@@ -1,0 +1,17 @@
+cmake_minimum_required(VERSION 3.16)
+project(hspfmt LANGUAGES CXX)
+
+add_library(hspfmt_lib hspfmt.cpp)
+target_compile_features(hspfmt_lib PUBLIC cxx_std_17)
+target_include_directories(hspfmt_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+add_executable(hspfmt main.cpp)
+target_link_libraries(hspfmt PRIVATE hspfmt_lib)
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(hspfmt_tests ../../test/test_hspfmt/test_hspfmt.cpp)
+    target_link_libraries(hspfmt_tests PRIVATE hspfmt_lib)
+    add_test(NAME hspfmt COMMAND hspfmt_tests)
+    add_executable(hspfmt_corpus ../../test/test_hspfmt/corpus.cpp)
+    target_link_libraries(hspfmt_corpus PRIVATE hspfmt_lib)
+endif()

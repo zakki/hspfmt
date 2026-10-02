@@ -1,0 +1,420 @@
+#include "hspfmt.h"
+
+#include <algorithm>
+#include <stdexcept>
+#include <utility>
+
+namespace hspfmt {
+namespace {
+
+bool digit(char c) { return c >= '0' && c <= '9'; }
+bool alpha(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+}
+std::string lower(std::string_view s) {
+    std::string out(s);
+    for (char &c : out) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+    return out;
+}
+bool one_of(std::string_view s, std::initializer_list<std::string_view> values) {
+    return std::find(values.begin(), values.end(), s) != values.end();
+}
+
+// Validate boundaries so a CP932 trail byte (notably 0x5c) is never syntax.
+std::size_t character_end(std::string_view s, std::size_t i, Encoding encoding) {
+    const auto c = static_cast<unsigned char>(s[i]);
+    if (c < 128) return i + 1;
+    if (encoding == Encoding::Cp932) {
+        if (c >= 0xa1 && c <= 0xdf) return i + 1;
+        if ((c >= 0x81 && c <= 0x9f) || (c >= 0xe0 && c <= 0xfc)) {
+            if (i + 1 < s.size()) {
+                const auto next = static_cast<unsigned char>(s[i + 1]);
+                if (next >= 0x40 && next <= 0xfc && next != 0x7f) return i + 2;
+            }
+        }
+        throw std::runtime_error("invalid CP932 byte sequence at byte " + std::to_string(i));
+    }
+    unsigned count = c >= 0xc2 && c <= 0xdf ? 2 :
+                     c >= 0xe0 && c <= 0xef ? 3 :
+                     c >= 0xf0 && c <= 0xf4 ? 4 : 0;
+    if (!count || i + count > s.size())
+        throw std::runtime_error("invalid UTF-8; use --encoding=cp932 for CP932 input");
+    for (unsigned j = 1; j < count; ++j) {
+        const auto b = static_cast<unsigned char>(s[i + j]);
+        if (b < 0x80 || b > 0xbf) throw std::runtime_error("invalid UTF-8 continuation");
+    }
+    const auto second = static_cast<unsigned char>(s[i + 1]);
+    if ((c == 0xe0 && second < 0xa0) || (c == 0xed && second >= 0xa0) ||
+        (c == 0xf0 && second < 0x90) || (c == 0xf4 && second >= 0x90))
+        throw std::runtime_error("invalid UTF-8 code point");
+    return i + count;
+}
+
+struct Item {
+    Kind kind;
+    std::string text;
+    bool gap;
+};
+
+struct Frame {
+    std::string close;
+    bool case_body = false;
+    bool operator==(const Frame &other) const {
+        return close == other.close && case_body == other.case_body;
+    }
+};
+struct State {
+    std::vector<Frame> blocks;
+    unsigned function = 0;
+    unsigned depth() const {
+        unsigned n = function;
+        for (const auto &frame : blocks) n += frame.case_body ? 2 : 1;
+        return n;
+    }
+};
+struct Conditional {
+    State before;
+    State branch;
+    bool has_branch = false;
+    bool has_else = false;
+};
+
+void close_block(State &state, std::string_view close) {
+    if (state.blocks.empty() || state.blocks.back().close != close)
+        throw std::runtime_error("unmatched block terminator: " + std::string(close));
+    state.blocks.pop_back();
+}
+
+// Surface grammar: statement boundaries, braces, and standard macro blocks.
+// Includes and macros are deliberately not expanded.
+void parse_line(const std::vector<Item> &items, State &state) {
+    bool statement = true;
+    for (const auto &item : items) {
+        if (item.kind == Kind::Comment) continue;
+        const std::string word = lower(item.text);
+        if (item.text == "{") {
+            state.blocks.push_back({"}", false});
+            statement = true;
+        } else if (item.text == "}") {
+            close_block(state, "}");
+            statement = true;
+        } else if (item.text == ":") {
+            statement = true;
+        } else {
+            if (statement) {
+                if (word == "repeat" || word == "foreach") state.blocks.push_back({"loop", false});
+                else if (word == "while") state.blocks.push_back({"wend", false});
+                else if (word == "for") state.blocks.push_back({"next", false});
+                else if (word == "do") state.blocks.push_back({"until", false});
+                else if (word == "switch") state.blocks.push_back({"swend", false});
+                else if (one_of(word, {"loop", "wend", "next", "until", "swend"}))
+                    close_block(state, word);
+                else if (word == "case" || word == "default") {
+                    if (state.blocks.empty() || state.blocks.back().close != "swend")
+                        throw std::runtime_error("case/default outside switch");
+                    state.blocks.back().case_body = true;
+                }
+            }
+            statement = false;
+        }
+    }
+}
+
+bool binary(std::string_view s) {
+    return one_of(s, {"=", "==", "!", "!=", "+", "-", "*", "/", "\\", "&", "|", "^",
+                      "&&", "||", "<", ">", "<=", ">=", "<<", ">>", "+=", "-=", "*=",
+                      "/=", "\\=", "&=", "|=", "^=", "and", "or", "xor"});
+}
+
+std::string print_items(const std::vector<Item> &items, const Options &options) {
+    std::string out;
+    bool previous_prefix = false;
+    bool expect_operand = true;
+    bool statement = true;
+    int parens = 0;
+    bool previous_command = false;
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        const auto &item = items[i];
+        std::string text = item.text;
+        const std::string word = lower(text);
+        const std::string prev = i ? items[i - 1].text : "";
+        const std::string next = i + 1 < items.size() ? items[i + 1].text : "";
+        const bool prefix = expect_operand && one_of(text, {"-", "+", "*"});
+        const bool postfix = one_of(text, {"+", "-", "++", "--"}) && i > 0 &&
+            (next.empty() || next == ":" || next == "}" || items[i + 1].kind == Kind::Comment);
+        bool space = i != 0;
+        if (i) {
+            if (item.kind == Kind::Comment) space = true;
+            else if (text == ":" || prev == ":" || text == "{" || prev == "{" || text == "}" || prev == "}") space = true;
+            else if (text == "," || text == ")" || text == "]") space = false;
+            else if (prev == ",") space = true;
+            else if (prev == "(" || prev == "[" || previous_prefix || postfix) space = false;
+            else if (text == "(" || text == "[") space = item.gap;
+            else if (text == "." || prev == "." || text == "@" || prev == "@") space = false;
+            else if (binary(word) || binary(lower(prev))) space = options.binary_spaces;
+            // Do not merge word operators with operands when compact spacing is requested.
+            if ((item.kind == Kind::Word && items[i - 1].kind == Kind::Word) ||
+                (item.kind == Kind::Number && items[i - 1].kind == Kind::Word) ||
+                (item.kind == Kind::Word && items[i - 1].kind == Kind::Number)) space = true;
+            // First command argument must remain separated, even for unary signs/labels.
+            if (previous_command && item.gap && text != "=" &&
+                !postfix && !one_of(text, {"(", "[", ".", "@"})) space = true;
+            // Compact spacing must not create ++, --, /*, //, <=, etc.
+            if (!space && !prev.empty() && !text.empty() &&
+                one_of(prev.substr(prev.size() - 1) + text.substr(0, 1),
+                       {"++", "--", "/*", "//", "==", "!=", "<=", ">=", "<<", ">>",
+                        "&&", "||", "+=", "-=", "*=", "/=", "\\=", "&=", "|=", "^="})) space = true;
+            if (item.kind == Kind::Word && one_of(word, {"and", "or", "xor"})) space = true;
+            if (one_of(lower(prev), {"and", "or", "xor"})) space = true;
+        }
+        if (options.hsp_numeric_prefixes && item.kind == Kind::Number && text.size() > 2) {
+            if (text.substr(0, 2) == "0x") text.replace(0, 2, "$");
+            else if (text.substr(0, 2) == "0b") text.replace(0, 2, "%");
+        }
+        if (space) out += ' ';
+        out += text;
+        previous_command = statement && item.kind == Kind::Word;
+        previous_prefix = prefix;
+        if (text == "(" || text == "[") { ++parens; expect_operand = true; }
+        else if (text == ")" || text == "]") { --parens; expect_operand = false; }
+        else if (one_of(text, {":", "{", "}"})) { statement = true; expect_operand = true; }
+        else if (text == "," || binary(word)) { expect_operand = true; statement = false; }
+        else if (item.kind != Kind::Comment) {
+            // At statement start a word can be a command; its first argument is an operand.
+            expect_operand = statement && item.kind == Kind::Word && parens == 0;
+            statement = false;
+        }
+    }
+    // A spacing choice must never merge/split tokens. This also guards syntax
+    // outside the small surface grammar (for example legacy dot subscripts).
+    const auto printed_tokens = lex(out, options.encoding);
+    std::size_t index = 0;
+    for (const auto &token : printed_tokens) {
+        if (token.kind == Kind::Space) continue;
+        if (index >= items.size()) throw std::runtime_error("spacing changed token boundaries");
+        std::string expected = items[index].text;
+        if (options.hsp_numeric_prefixes && items[index].kind == Kind::Number) {
+            if (expected.substr(0, 2) == "0x") expected.replace(0, 2, "$");
+            if (expected.substr(0, 2) == "0b") expected.replace(0, 2, "%");
+        }
+        if (token.kind != items[index].kind || out.substr(token.begin, token.end - token.begin) != expected)
+            throw std::runtime_error("spacing changed token boundaries");
+        ++index;
+    }
+    if (index != items.size()) throw std::runtime_error("spacing changed token boundaries");
+    return out;
+}
+
+// Only a complete, isolated one-line if with assignment statements is eligible.
+// No nested control flow, trailing statements, comments, or directive rewriting.
+std::vector<Item> short_if(std::vector<Item> items, const Options &options, unsigned depth) {
+    if (!options.short_if || items.size() < 7 || lower(items[0].text) != "if") return items;
+    for (const auto &item : items) if (item.kind == Kind::Comment) return items;
+    if (items.back().text != "}") return items;
+    std::size_t open = 1;
+    while (open < items.size() && items[open].text != "{") ++open;
+    if (open < 2 || open == items.size()) return items;
+    for (std::size_t i = 1; i < open; ++i)
+        if (one_of(items[i].text, {":", "}"})) return items;
+    std::size_t start = open + 1;
+    for (std::size_t i = start; i < items.size(); ++i) {
+        if (items[i].text == "{") return items;
+        if (items[i].text == ":" || items[i].text == "}") {
+            if (items[i].text == "}" && i != items.size() - 1) return items;
+            if (i < start + 3 || items[start].kind != Kind::Word || items[start + 1].text != "=") return items;
+            start = i + 1;
+        }
+    }
+    auto result = items;
+    result.pop_back();
+    result[open].text = ":";
+    if (result[1].text == "(" && result[open - 1].text == ")") {
+        int nesting = 0;
+        bool wraps = true;
+        for (std::size_t i = 1; i < open; ++i) {
+            if (result[i].text == "(") ++nesting;
+            if (result[i].text == ")") --nesting;
+            if (nesting == 0 && i != open - 1) wraps = false;
+        }
+        if (wraps && nesting == 0) {
+            result.erase(result.begin() + open - 1);
+            result.erase(result.begin() + 1);
+        }
+    }
+    if (print_items(result, options).size() + depth * options.indent_width > options.line_width) return items;
+    return result;
+}
+
+} // namespace
+
+std::vector<Token> lex(std::string_view s, Encoding encoding) {
+    std::vector<Token> tokens;
+    std::size_t i = 0;
+    while (i < s.size()) {
+        const std::size_t begin = i;
+        Kind kind = Kind::Symbol;
+        if (i == 0 && s.substr(0, 3) == "\xef\xbb\xbf") { kind = Kind::Bom; i += 3; }
+        else if (s[i] == ' ' || s[i] == '\t') {
+            kind = Kind::Space;
+            while (i < s.size() && (s[i] == ' ' || s[i] == '\t')) ++i;
+        } else if (s[i] == '\r' || s[i] == '\n') {
+            kind = Kind::Newline;
+            if (s[i++] == '\r' && i < s.size() && s[i] == '\n') ++i;
+        } else if (s[i] == ';' || s.substr(i, 2) == "//") {
+            kind = Kind::Comment;
+            while (i < s.size() && s[i] != '\r' && s[i] != '\n') i = character_end(s, i, encoding);
+        } else if (s.substr(i, 2) == "/*") {
+            kind = Kind::Comment;
+            i += 2;
+            while (i < s.size() && s.substr(i, 2) != "*/") i = character_end(s, i, encoding);
+            if (i == s.size()) throw std::runtime_error("unterminated block comment");
+            i += 2;
+        } else if (s[i] == '"' || s[i] == '\'' || s.substr(i, 2) == "{\"") {
+            kind = Kind::String;
+            const bool multiline = s[i] == '{';
+            const char quote = multiline ? '"' : s[i];
+            i += multiline ? 2 : 1;
+            bool closed = false;
+            while (i < s.size()) {
+                if (s[i] == quote && (!multiline || s.substr(i, 2) == "\"}")) {
+                    i += multiline ? 2 : 1;
+                    closed = true;
+                    break;
+                }
+                if (s[i] == '\\') {
+                    ++i;
+                    if (i < s.size()) i = character_end(s, i, encoding);
+                } else {
+                    if (!multiline && (s[i] == '\r' || s[i] == '\n'))
+                        throw std::runtime_error("newline in quoted string");
+                    i = character_end(s, i, encoding);
+                }
+            }
+            if (!closed) throw std::runtime_error("unterminated string");
+        } else if (digit(s[i]) || s[i] == '$' || (s[i] == '%' && i + 1 < s.size() && digit(s[i + 1]))) {
+            kind = Kind::Number;
+            const bool hex = s[i] == '$' || s.substr(i, 2) == "0x";
+            const bool bin = s[i] == '%' || s.substr(i, 2) == "0b";
+            i += (s.substr(i, 2) == "0x" || s.substr(i, 2) == "0b") ? 2 : 1;
+            while (i < s.size()) {
+                const char c = s[i];
+                if (digit(c) || c == '_' || (hex && ((c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))) ++i;
+                else if (!hex && !bin && c == '.' && i + 1 < s.size() && digit(s[i + 1])) ++i;
+                else if (!hex && !bin && (c == 'e' || c == 'E')) {
+                    ++i;
+                    if (i < s.size() && (s[i] == '+' || s[i] == '-')) ++i;
+                } else break;
+            }
+            if (i < s.size() && (s[i] == 'l' || s[i] == 'L' || s[i] == 'f' || s[i] == 'F')) ++i;
+        } else if (alpha(s[i]) || static_cast<unsigned char>(s[i]) >= 128) {
+            kind = Kind::Word;
+            do { i = character_end(s, i, encoding); }
+            while (i < s.size() && (alpha(s[i]) || digit(s[i]) || static_cast<unsigned char>(s[i]) >= 128));
+        } else {
+            if (s[i] == '\0') throw std::runtime_error("NUL byte in source");
+            ++i;
+            if (i < s.size() && one_of(s.substr(begin, 2), {"==", "!=", "<=", ">=", "<<", ">>", "&&", "||",
+                  "++", "--", "+=", "-=", "*=", "/=", "\\=", "&=", "|=", "^="})) ++i;
+        }
+        tokens.push_back({kind, begin, i});
+    }
+    return tokens;
+}
+
+std::string format(std::string_view source, const Options &options) {
+    if (options.indent_width > 16) throw std::runtime_error("indent width must be between 0 and 16");
+    const auto tokens = lex(source, options.encoding);
+    State state;
+    std::vector<Conditional> conditionals;
+    std::vector<Item> items;
+    std::string out;
+    std::size_t begin = 0;
+    bool protected_line = false;
+    bool continuation = false;
+    bool gap = false;
+    bool disabled = false;
+    auto flush = [&](std::size_t end, std::string_view newline) {
+        const std::string_view raw = source.substr(begin, end - begin);
+        bool preserve = protected_line || continuation || disabled;
+        const bool next_continuation = !items.empty() && items.back().text == "\\";
+        if (next_continuation) preserve = true;
+        const bool was_disabled = disabled;
+        if (items.size() == 1 && items[0].kind == Kind::Comment) {
+            if (items[0].text == "; hspfmt: off") { disabled = true; preserve = true; }
+            if (items[0].text == "; hspfmt: on") { disabled = false; preserve = true; }
+        }
+        const bool opaque = continuation || next_continuation || was_disabled || disabled;
+        if (!opaque && !items.empty() && items[0].text == "#") {
+            preserve = true;
+            const std::string directive = items.size() > 1 ? lower(items[1].text) : "";
+            if (one_of(directive, {"if", "ifdef", "ifndef"})) {
+                conditionals.push_back({state, {}, false, false});
+            } else if (directive == "else" || directive == "elif") {
+                if (conditionals.empty()) throw std::runtime_error("unmatched preprocessor branch");
+                auto &c = conditionals.back();
+                if (c.has_else) throw std::runtime_error("branch after #else");
+                if (c.has_branch && c.branch.blocks != state.blocks) throw std::runtime_error("conditional branches have different block structure");
+                if (c.has_branch) state.function = std::max(state.function, c.branch.function);
+                c.branch = state;
+                c.has_branch = true;
+                c.has_else = directive == "else";
+                state = c.before;
+            } else if (directive == "endif") {
+                if (conditionals.empty()) throw std::runtime_error("unmatched #endif");
+                const auto c = conditionals.back();
+                conditionals.pop_back();
+                if ((c.has_branch && c.branch.blocks != state.blocks) || (!c.has_else && c.before.blocks != state.blocks))
+                    throw std::runtime_error("conditional branches have different block structure");
+                if (c.has_branch) state.function = std::max(state.function, c.branch.function);
+                if (!c.has_else) state.function = std::max(state.function, c.before.function);
+            } else if (one_of(directive, {"deffunc", "defcfunc", "modfunc", "modcfunc", "modinit", "modterm"})) {
+                if (!state.blocks.empty()) throw std::runtime_error("function declaration inside open block");
+                state.function = 1;
+            } else if (directive == "global" || directive == "module") {
+                if (!state.blocks.empty()) throw std::runtime_error("module boundary inside open block");
+                state.function = 0;
+            }
+        } else if (!preserve) {
+            State line_state = state;
+            if (!items.empty()) {
+                const auto first = lower(items[0].text);
+                if (one_of(first, {"}", "loop", "wend", "next", "until", "swend"})) close_block(line_state, first);
+                else if ((first == "case" || first == "default") && !line_state.blocks.empty())
+                    line_state.blocks.back().case_body = false;
+            }
+            const bool label = items.size() >= 2 && items[0].text == "*" && items[1].kind == Kind::Word;
+            const unsigned depth = label ? 0 : line_state.depth();
+            auto printed = short_if(items, options, depth);
+            if (!items.empty()) {
+                out.append(options.tabs ? depth : depth * options.indent_width, options.tabs ? '\t' : ' ');
+                out += print_items(printed, options);
+            }
+        }
+        if (!opaque && (items.empty() || items[0].text != "#")) parse_line(items, state);
+        if (preserve) out.append(raw);
+        out.append(newline);
+        continuation = next_continuation;
+        items.clear();
+        protected_line = false;
+        gap = false;
+        begin = end + newline.size();
+    };
+    for (const auto &token : tokens) {
+        const auto text = source.substr(token.begin, token.end - token.begin);
+        if (token.kind == Kind::Bom) { out.append(text); begin = token.end; }
+        else if (token.kind == Kind::Newline) flush(token.begin, text);
+        else if (token.kind == Kind::Space) gap = true;
+        else {
+            // Multiline tokens are copied together with their entire surrounding line.
+            if (text.find_first_of("\r\n") != std::string_view::npos) protected_line = true;
+            items.push_back({token.kind, std::string(text), gap});
+            gap = false;
+        }
+    }
+    if (begin < source.size()) flush(source.size(), "");
+    if (!conditionals.empty()) throw std::runtime_error("unterminated preprocessor conditional");
+    if (!state.blocks.empty()) throw std::runtime_error("unterminated block, expected " + state.blocks.back().close);
+    return out;
+}
+
+} // namespace hspfmt

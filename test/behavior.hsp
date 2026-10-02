@@ -1,0 +1,33 @@
+; Exercise both sides of conditionals, including statements after a block.
+repeat 2
+flag=cnt
+foo=0:baz=0
+if (flag) { foo=7:baz=1 }
+mes str(foo)+","+str(baz)
+if flag { foo=9 } : baz=3
+mes str(foo)+","+str(baz)
+if flag : foo=2:baz=4
+mes str(foo)+","+str(baz)
+loop
+x=0
+while x<3
+x+=1
+wend
+for i,0,2
+x+=i
+next
+do
+x-=1
+until x=2
+switch x
+case 2
+mes "switch ok"
+swbreak
+default
+mes "switch bad"
+swend
+mes $00ff+%0010
+mes 0x00ff+0b0010
+mes 1.0e-2
+mes "hspfmt integration ok"
+end
