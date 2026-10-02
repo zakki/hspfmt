@@ -40,7 +40,7 @@ Visual Studioなどの複数構成ジェネレータでは、実行ファイル�
 | `--encoding=cp932` | CP932の文字境界で処理。符号化変換はしない |
 | `--roundtrip` | 字句解析した全トークンを無変更で連結して出力 |
 | `--indent-labels`, `--no-indent-labels` | ラベル以降の本文を1段下げる／下げない。既定は下げない |
-| `--comment-style=preserve\|basic\|c` | 行コメントの記号を維持／`;`／`//` に統一。既定は維持 |
+| `--comment-style=preserve\|semicolon\|c` | 行コメントの記号を維持／`;`／`//` に統一。既定は維持 |
 | `--block-comments=preserve\|lines\|block` | 独立したコメントのブロック形式を維持／行コメント化／ブロック化。既定は維持 |
 | `--condition-parens=preserve\|add\|remove` | `if`・`while` の式全体を囲む括弧を維持／追加／除去。既定は維持 |
 | `--repeat-parens=preserve\|add\|remove` | `repeat` の各引数を囲む括弧を維持／追加／除去。既定は維持 |
@@ -69,7 +69,7 @@ if flag : foo = bar : baz = 1
 空行数は各宣言の直前に連続する説明コメントの前に適用し、ファイル先頭には空行を追加しません。`=preserve` を指定すると元の空行数を維持します。追加する改行は直前の行の改行形式に合わせます。
 
 ```sh
-build/hspfmt --indent-labels --comment-style=basic --block-comments=lines \
+build/hspfmt --indent-labels --comment-style=semicolon --block-comments=lines \
   --condition-parens=remove --repeat-parens=remove \
   --blank-lines-before-module=2 --blank-lines-before-deffunc=1 \
   --blank-lines-before-defcfunc=1 script.hsp

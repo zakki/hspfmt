@@ -26,7 +26,7 @@ trap 'echo "hspfmt integration artifacts: $test_dir" >&2' EXIT
 "$formatter" --roundtrip "$repo/test/behavior.hsp" > "$test_dir/roundtrip.hsp"
 cmp "$repo/test/behavior.hsp" "$test_dir/roundtrip.hsp"
 
-modes='default compact short parens-add parens-remove comments-basic comments-c comments-block labels declarations combined'
+modes='default compact short parens-add parens-remove comments-semicolon comments-c comments-block labels declarations combined'
 for mode in $modes; do
     case "$mode" in
         default) set -- ;;
@@ -34,12 +34,12 @@ for mode in $modes; do
         short) set -- --short-if --hsp-prefixes ;;
         parens-add) set -- --condition-parens=add --repeat-parens=add ;;
         parens-remove) set -- --condition-parens=remove --repeat-parens=remove ;;
-        comments-basic) set -- --comment-style=basic --block-comments=lines ;;
+        comments-semicolon) set -- --comment-style=semicolon --block-comments=lines ;;
         comments-c) set -- --comment-style=c --block-comments=lines ;;
         comments-block) set -- --block-comments=block ;;
         labels) set -- --indent-labels ;;
         declarations) set -- --blank-lines-before-module=2 --blank-lines-before-deffunc=1 --blank-lines-before-defcfunc=0 ;;
-        combined) set -- --indent-labels --comment-style=basic --block-comments=lines --condition-parens=add --repeat-parens=add --short-if --blank-lines-before-module=2 --blank-lines-before-deffunc=1 --blank-lines-before-defcfunc=1 ;;
+        combined) set -- --indent-labels --comment-style=semicolon --block-comments=lines --condition-parens=add --repeat-parens=add --short-if --blank-lines-before-module=2 --blank-lines-before-deffunc=1 --blank-lines-before-defcfunc=1 ;;
     esac
     "$formatter" "$@" "$repo/test/behavior.hsp" > "$test_dir/$mode.hsp"
     "$formatter" "$@" --check "$test_dir/$mode.hsp"
@@ -76,6 +76,7 @@ expect_error --write -
 expect_error --write --check "$test_dir/roundtrip.hsp"
 expect_error --write --roundtrip "$test_dir/roundtrip.hsp"
 expect_error --comment-style=unknown "$test_dir/roundtrip.hsp"
+expect_error --comment-style=basic "$test_dir/roundtrip.hsp"
 expect_error --block-comments=unknown "$test_dir/roundtrip.hsp"
 expect_error --condition-parens=unknown "$test_dir/roundtrip.hsp"
 expect_error --repeat-parens=unknown "$test_dir/roundtrip.hsp"

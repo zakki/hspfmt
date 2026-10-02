@@ -96,7 +96,7 @@ int main(int argc, char **argv) {
             else if (!positional && arg.rfind("--comment-style=", 0) == 0) {
                 const auto value = arg.substr(16);
                 if (value == "preserve") options.comment_style = hspfmt::CommentStyle::Preserve;
-                else if (value == "basic") options.comment_style = hspfmt::CommentStyle::Basic;
+                else if (value == "semicolon") options.comment_style = hspfmt::CommentStyle::Semicolon;
                 else if (value == "c") options.comment_style = hspfmt::CommentStyle::C;
                 else throw std::runtime_error("invalid comment style: " + value);
             }
@@ -128,7 +128,7 @@ int main(int argc, char **argv) {
                     "  --short-if           Collapse isolated single-line assignment if blocks\n"
                     "  --line-width=N       Short-if byte width limit (default: 100)\n"
                     "  --indent-labels / --no-indent-labels (default: no indentation)\n"
-                    "  --comment-style=preserve|basic|c (line comment markers)\n"
+                    "  --comment-style=preserve|semicolon|c (line comment markers)\n"
                     "  --block-comments=preserve|lines|block (standalone comments)\n"
                     "  --condition-parens=preserve|add|remove (if/while)\n"
                     "  --repeat-parens=preserve|add|remove (each repeat argument)\n"

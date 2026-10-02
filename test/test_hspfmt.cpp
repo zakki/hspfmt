@@ -85,7 +85,7 @@ int main() {
         options.tabs = true;
         expect("*main\nrepeat\nx=1\nloop\n", "*main\n\trepeat\n\t\tx = 1\n\tloop\n", options);
         options = {};
-        options.comment_style = hspfmt::CommentStyle::Basic;
+        options.comment_style = hspfmt::CommentStyle::Semicolon;
         expect("// hello\nx=1 // tail\nmes \"// stays\"\n", "; hello\nx = 1 ; tail\nmes \"// stays\"\n", options);
         expect("#define f x // stays\nx = 1 + \\\n  2 // stays\n", "#define f x // stays\nx = 1 + \\\n  2 // stays\n", options);
         expect("// hspfmt: off\nx=1\n", "// hspfmt: off\nx = 1\n", options);
@@ -99,7 +99,7 @@ int main() {
         expect("if x { /* multiline\n kept */\nx=1\n}\n", "if x { /* multiline\n kept */\n    x = 1\n}\n", options);
         expect("\xef\xbb\xbf" "/* head\r\n tail*/", "\xef\xbb\xbf" "// head\r\n// tail", options);
         expect("/* hspfmt: off */\nx=1\n", "/* hspfmt: off */\nx = 1\n", options);
-        options.comment_style = hspfmt::CommentStyle::Basic;
+        options.comment_style = hspfmt::CommentStyle::Semicolon;
         expect("repeat\n/* a\nb*/\nloop\n", "repeat\n    ; a\n    ;b\nloop\n", options);
         options = {};
         options.block_comments = hspfmt::BlockComments::Block;
@@ -142,7 +142,7 @@ int main() {
         expect("x=1\n/* docs\nmore */\n#deffunc f\nreturn\n", "x = 1\n\n/* docs\nmore */\n#deffunc f\n    return\n", options);
         expect("s={\"\n#module text\n\"}\n; hspfmt: off\n#module kept\n; hspfmt: on\n#module m\n",
                "s={\"\n#module text\n\"}\n; hspfmt: off\n#module kept\n; hspfmt: on\n\n\n#module m\n", options);
-        options.comment_style = hspfmt::CommentStyle::Basic;
+        options.comment_style = hspfmt::CommentStyle::Semicolon;
         options.block_comments = hspfmt::BlockComments::Lines;
         expect("x=1\n/* docs\nmore */\n#deffunc f\nreturn\n", "x = 1\n\n; docs\n;more \n#deffunc f\n    return\n", options);
         options = {};

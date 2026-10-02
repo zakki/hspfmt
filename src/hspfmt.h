@@ -9,7 +9,7 @@ namespace hspfmt {
 
 enum class Encoding { Utf8, Cp932 };
 enum class Kind { Space, Newline, Word, Number, String, Comment, Symbol, Bom };
-enum class CommentStyle { Preserve, Basic, C };
+enum class CommentStyle { Preserve, Semicolon, C };
 enum class BlockComments { Preserve, Lines, Block };
 enum class Parentheses { Preserve, Add, Remove };
 
