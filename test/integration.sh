@@ -1,14 +1,30 @@
 #!/bin/sh
-# Run from any directory. Requires a built hspfmt, hspcmp and hsp3cl.
+# Run from any directory. Requires a built hspfmt, GNU coreutils and OpenHSP.
 set -eu
-repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-formatter=${1:-"$repo/build/hspfmt/hspfmt"}
+repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+formatter=${1:-"$repo/build/hspfmt"}
+case "$formatter" in
+    /*) ;;
+    *) formatter="$(pwd)/$formatter" ;;
+esac
+hspcmp=$(command -v "${HSPCMP:-hspcmp}")
+hsp3cl=$(command -v "${HSP3CL:-hsp3cl}")
+: "${HSP_COMMON:?Set HSP_COMMON to the OpenHSP common directory}"
+hsp_common=$(CDPATH= cd -- "$HSP_COMMON" && pwd)
+case "$hspcmp" in
+    /*) ;;
+    *) hspcmp="$(pwd)/$hspcmp" ;;
+esac
+case "$hsp3cl" in
+    /*) ;;
+    *) hsp3cl="$(pwd)/$hsp3cl" ;;
+esac
 test_dir=$(mktemp -d)
 # Retain generated artifacts for inspection, including on failure.
 trap 'echo "hspfmt integration artifacts: $test_dir" >&2' EXIT
 
-"$formatter" --roundtrip "$repo/test/test_hspfmt/behavior.hsp" > "$test_dir/roundtrip.hsp"
-cmp "$repo/test/test_hspfmt/behavior.hsp" "$test_dir/roundtrip.hsp"
+"$formatter" --roundtrip "$repo/test/behavior.hsp" > "$test_dir/roundtrip.hsp"
+cmp "$repo/test/behavior.hsp" "$test_dir/roundtrip.hsp"
 
 for mode in default compact short; do
     case "$mode" in
@@ -16,7 +32,7 @@ for mode in default compact short; do
         compact) set -- --compact-operators ;;
         short) set -- --short-if --hsp-prefixes ;;
     esac
-    "$formatter" "$@" "$repo/test/test_hspfmt/behavior.hsp" > "$test_dir/$mode.hsp"
+    "$formatter" "$@" "$repo/test/behavior.hsp" > "$test_dir/$mode.hsp"
     "$formatter" "$@" --check "$test_dir/$mode.hsp"
     "$formatter" "$@" "$test_dir/$mode.hsp" > "$test_dir/again.hsp"
     cmp "$test_dir/$mode.hsp" "$test_dir/again.hsp"
@@ -50,18 +66,18 @@ expect_error --write
 expect_error --write -
 expect_error --write --check "$test_dir/roundtrip.hsp"
 expect_error --write --roundtrip "$test_dir/roundtrip.hsp"
-cp "$repo/test/test_hspfmt/invalid.hsp" "$test_dir/invalid.hsp"
+cp "$repo/test/invalid.hsp" "$test_dir/invalid.hsp"
 expect_error --write "$test_dir/invalid.hsp"
-cmp "$repo/test/test_hspfmt/invalid.hsp" "$test_dir/invalid.hsp"
+cmp "$repo/test/invalid.hsp" "$test_dir/invalid.hsp"
 ln -s "$test_dir/roundtrip.hsp" "$test_dir/symlink.hsp"
 expect_error --write "$test_dir/symlink.hsp"
 test -L "$test_dir/symlink.hsp"
 ln "$test_dir/roundtrip.hsp" "$test_dir/hardlink.hsp"
 expect_error --write "$test_dir/hardlink.hsp"
-cmp "$repo/test/test_hspfmt/behavior.hsp" "$test_dir/roundtrip.hsp"
+cmp "$repo/test/behavior.hsp" "$test_dir/roundtrip.hsp"
 test -z "$(find "$test_dir" -name '.hspfmt-*' -print)"
 
-if "$formatter" --check "$repo/test/test_hspfmt/behavior.hsp"; then
+if "$formatter" --check "$repo/test/behavior.hsp"; then
     echo 'expected --check to report unformatted input' >&2
     exit 1
 else
@@ -76,9 +92,9 @@ fi
 
 cd "$test_dir"
 for mode in roundtrip default compact short; do
-    "$repo/hspcmp" -i -u "--compath=$repo/common/" "-o$test_dir/$mode.ax" "$test_dir/$mode.hsp" > "$test_dir/$mode.compile"
+    "$hspcmp" -i -u "--compath=$hsp_common/" "-o$test_dir/$mode.ax" "$test_dir/$mode.hsp" > "$test_dir/$mode.compile"
     test -s "$test_dir/$mode.ax"
-    "$repo/hsp3cl" "$test_dir/$mode.ax" > "$test_dir/$mode.out"
+    "$hsp3cl" "$test_dir/$mode.ax" > "$test_dir/$mode.out"
     tail -n 1 "$test_dir/$mode.out" | grep -Fx 'hspfmt integration ok'
     cmp "$test_dir/roundtrip.out" "$test_dir/$mode.out"
 done

@@ -1,19 +1,21 @@
-# HSP formatter
+# hspfmt — HSP formatter
 
 HSPのマクロ展開前のソースを整形する、C++17製の試作CLIです。PythonやNode.jsを実行時に必要としません。既定では整形結果を標準出力に出し、`--write`（`-w`）指定時は入力ファイルを上書きします。
 
 ## ビルドと実行
 
-OpenHSPリポジトリのルートから実行します。
+CMake 3.16以上とC++17対応コンパイラが必要です。
 
 ```sh
-cmake -S src/hspfmt -B build/hspfmt -DCMAKE_BUILD_TYPE=Release
-cmake --build build/hspfmt
-build/hspfmt/hspfmt script.hsp
-build/hspfmt/hspfmt --check script.hsp
-build/hspfmt/hspfmt --short-if --hsp-prefixes script.hsp
-build/hspfmt/hspfmt --write script.hsp
+cmake -S src -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+build/hspfmt script.hsp
+build/hspfmt --check script.hsp
+build/hspfmt --short-if --hsp-prefixes script.hsp
+build/hspfmt --write script.hsp
 ```
+
+Visual Studioなどの複数構成ジェネレータでは、実行ファイルは `build/Release/hspfmt.exe` に生成されます。テスト用ツールのビルドを省く場合は、CMakeの構成時に `-DBUILD_TESTING=OFF` を指定します。
 
 ファイル名を省略するか `-` を指定すると標準入力を読みます。`--check` は整形済みなら0、差分があれば1、入出力・解析エラーなら2を返します。通常実行のエラーも2です。入力と同じファイルへシェルでリダイレクトしないでください。
 
@@ -73,11 +75,31 @@ custom_end
 ## テスト
 
 ```sh
-ctest --test-dir build/hspfmt --output-on-failure
-build/hspfmt/hspfmt_corpus ref/RBS/hsp sample common
-sh test/test_hspfmt/integration.sh
+ctest --test-dir build -C Release --output-on-failure
+build/hspfmt_corpus test
 ```
 
-C++テストは期待出力、トークンの完全再現、冪等性、文字コード、エラーを検証します。corpusツールは各ディレクトリ内の `.hsp` と `.as` を読み取り、整形拒否を報告し、整形可能な入力の冪等性と空白以外のトークン不変を検証します。不変条件違反で終了コード1、整形拒否だけなら0です。符号化はUTF-8を試し、失敗した場合CP932を試します。
+C++テストは期待出力、トークンの完全再現、冪等性、文字コード、エラーを検証します。既定の `BUILD_TESTING=ON` でビルドしてください。複数構成ジェネレータではcorpusツールも `build/Release/hspfmt_corpus.exe` を使用します。
 
-integrationスクリプトはローカルの `hspcmp` と `hsp3cl` を使用して、原文・通常整形・空白を詰めた整形・コロン化したコードの実行出力を比較します。生成物は表示された一時ディレクトリに残します。テスト用のHSP入力と期待出力を `test/test_hspfmt` に追加する形で貢献できます。
+corpusツールは指定した各ディレクトリ内の `.hsp` と `.as` を読み取り、整形拒否を報告し、整形可能な入力の冪等性と空白以外のトークン不変を検証します。不変条件違反で終了コード1、整形拒否だけなら0です。符号化はUTF-8を試し、失敗した場合CP932を試します。上の例ではエラー確認用の `test/invalid.hsp` の整形拒否が報告されます。任意のHSPプロジェクトも検査できます。
+
+```sh
+build/hspfmt_corpus /path/to/hsp-project /path/to/OpenHSP/sample /path/to/OpenHSP/common
+```
+
+コンパイル・実行結果を比較する統合テストには、Linux環境の `sh`、GNU coreutils、OpenHSPの `hspcmp`、`hsp3cl`、同じ環境の `common/` が別途必要です。
+
+```sh
+HSPCMP=/path/to/OpenHSP/hspcmp \
+HSP3CL=/path/to/OpenHSP/hsp3cl \
+HSP_COMMON=/path/to/OpenHSP/common \
+sh test/integration.sh
+```
+
+`hspcmp` と `hsp3cl` がPATHにあれば、`HSPCMP` と `HSP3CL` は省略できます。`HSP_COMMON` は必ず指定します。スクリプトの第1引数には、別のビルド先のhspfmt実行ファイルを指定できます（既定は `build/hspfmt`）。
+
+統合テストは原文・通常整形・空白を詰めた整形・コロン化したコードの実行出力を比較します。生成物は表示された一時ディレクトリに残します。整形規則の変更時は `test/test_hspfmt.cpp` に期待出力を、実行結果の検証には `test/behavior.hsp` に入力を追加してください。
+
+## ライセンス
+
+BSD 2-Clause Licenseで公開しています。詳細は [LICENSE](LICENSE) を参照してください。

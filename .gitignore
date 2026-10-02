@@ -1,0 +1,42 @@
+# Out-of-source builds
+/build/
+/build-*/
+/cmake-build-*/
+
+# CMake and CTest generated files (including accidental in-source builds)
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+DartConfiguration.tcl
+Testing/
+compile_commands.json
+Makefile
+build.ninja
+rules.ninja
+.ninja_deps
+.ninja_log
+
+# Compiled outputs
+*.o
+*.obj
+*.a
+*.lib
+*.exe
+*.pdb
+*.ilk
+/src/hspfmt
+/src/hspfmt_tests
+/src/hspfmt_corpus
+
+# HSP compiler artifacts
+*.ax
+__hsptmp.*
+hsptmp
+.hspres
+
+# Local editor files
+.vs/
+*.swp
+*.swo
+*~
