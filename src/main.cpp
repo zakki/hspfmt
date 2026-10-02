@@ -57,6 +57,20 @@ unsigned number(const std::string &s) {
     if (value > 10000) throw std::runtime_error("numeric option too large");
     return static_cast<unsigned>(value);
 }
+
+hspfmt::Parentheses parentheses(const std::string &s) {
+    if (s == "preserve") return hspfmt::Parentheses::Preserve;
+    if (s == "add") return hspfmt::Parentheses::Add;
+    if (s == "remove") return hspfmt::Parentheses::Remove;
+    throw std::runtime_error("invalid parentheses mode: " + s);
+}
+
+int blank_lines(const std::string &s) {
+    if (s == "preserve") return -1;
+    const auto value = number(s);
+    if (value > 16) throw std::runtime_error("blank line count must be between 0 and 16");
+    return static_cast<int>(value);
+}
 }
 
 int main(int argc, char **argv) {
@@ -77,6 +91,27 @@ int main(int argc, char **argv) {
             else if (!positional && arg == "--compact-operators") options.binary_spaces = false;
             else if (!positional && arg == "--hsp-prefixes") options.hsp_numeric_prefixes = true;
             else if (!positional && arg == "--short-if") options.short_if = true;
+            else if (!positional && arg == "--indent-labels") options.indent_labels = true;
+            else if (!positional && arg == "--no-indent-labels") options.indent_labels = false;
+            else if (!positional && arg.rfind("--comment-style=", 0) == 0) {
+                const auto value = arg.substr(16);
+                if (value == "preserve") options.comment_style = hspfmt::CommentStyle::Preserve;
+                else if (value == "basic") options.comment_style = hspfmt::CommentStyle::Basic;
+                else if (value == "c") options.comment_style = hspfmt::CommentStyle::C;
+                else throw std::runtime_error("invalid comment style: " + value);
+            }
+            else if (!positional && arg.rfind("--block-comments=", 0) == 0) {
+                const auto value = arg.substr(17);
+                if (value == "preserve") options.block_comments = hspfmt::BlockComments::Preserve;
+                else if (value == "lines") options.block_comments = hspfmt::BlockComments::Lines;
+                else if (value == "block") options.block_comments = hspfmt::BlockComments::Block;
+                else throw std::runtime_error("invalid block comment mode: " + value);
+            }
+            else if (!positional && arg.rfind("--condition-parens=", 0) == 0) options.condition_parens = parentheses(arg.substr(19));
+            else if (!positional && arg.rfind("--repeat-parens=", 0) == 0) options.repeat_parens = parentheses(arg.substr(16));
+            else if (!positional && arg.rfind("--blank-lines-before-module=", 0) == 0) options.blank_lines_before_module = blank_lines(arg.substr(28));
+            else if (!positional && arg.rfind("--blank-lines-before-deffunc=", 0) == 0) options.blank_lines_before_deffunc = blank_lines(arg.substr(29));
+            else if (!positional && arg.rfind("--blank-lines-before-defcfunc=", 0) == 0) options.blank_lines_before_defcfunc = blank_lines(arg.substr(30));
             else if (!positional && arg == "--encoding=cp932") options.encoding = hspfmt::Encoding::Cp932;
             else if (!positional && arg == "--encoding=utf8") options.encoding = hspfmt::Encoding::Utf8;
             else if (!positional && arg.rfind("--indent=", 0) == 0) options.indent_width = number(arg.substr(9));
@@ -92,6 +127,14 @@ int main(int argc, char **argv) {
                     "  --hsp-prefixes       Convert 0x/0b to $/% (preserve digits)\n"
                     "  --short-if           Collapse isolated single-line assignment if blocks\n"
                     "  --line-width=N       Short-if byte width limit (default: 100)\n"
+                    "  --indent-labels / --no-indent-labels (default: no indentation)\n"
+                    "  --comment-style=preserve|basic|c (line comment markers)\n"
+                    "  --block-comments=preserve|lines|block (standalone comments)\n"
+                    "  --condition-parens=preserve|add|remove (if/while)\n"
+                    "  --repeat-parens=preserve|add|remove (each repeat argument)\n"
+                    "  --blank-lines-before-module=N|preserve (0..16)\n"
+                    "  --blank-lines-before-deffunc=N|preserve (0..16)\n"
+                    "  --blank-lines-before-defcfunc=N|preserve (0..16)\n"
                     "  --encoding=utf8|cp932 (default: utf8; bytes are preserved)\n"
                     "Exit 2 indicates an input, syntax, option, or output error.\n";
                 return 0;

@@ -26,11 +26,20 @@ trap 'echo "hspfmt integration artifacts: $test_dir" >&2' EXIT
 "$formatter" --roundtrip "$repo/test/behavior.hsp" > "$test_dir/roundtrip.hsp"
 cmp "$repo/test/behavior.hsp" "$test_dir/roundtrip.hsp"
 
-for mode in default compact short; do
+modes='default compact short parens-add parens-remove comments-basic comments-c comments-block labels declarations combined'
+for mode in $modes; do
     case "$mode" in
         default) set -- ;;
         compact) set -- --compact-operators ;;
         short) set -- --short-if --hsp-prefixes ;;
+        parens-add) set -- --condition-parens=add --repeat-parens=add ;;
+        parens-remove) set -- --condition-parens=remove --repeat-parens=remove ;;
+        comments-basic) set -- --comment-style=basic --block-comments=lines ;;
+        comments-c) set -- --comment-style=c --block-comments=lines ;;
+        comments-block) set -- --block-comments=block ;;
+        labels) set -- --indent-labels ;;
+        declarations) set -- --blank-lines-before-module=2 --blank-lines-before-deffunc=1 --blank-lines-before-defcfunc=0 ;;
+        combined) set -- --indent-labels --comment-style=basic --block-comments=lines --condition-parens=add --repeat-parens=add --short-if --blank-lines-before-module=2 --blank-lines-before-deffunc=1 --blank-lines-before-defcfunc=1 ;;
     esac
     "$formatter" "$@" "$repo/test/behavior.hsp" > "$test_dir/$mode.hsp"
     "$formatter" "$@" --check "$test_dir/$mode.hsp"
@@ -66,6 +75,13 @@ expect_error --write
 expect_error --write -
 expect_error --write --check "$test_dir/roundtrip.hsp"
 expect_error --write --roundtrip "$test_dir/roundtrip.hsp"
+expect_error --comment-style=unknown "$test_dir/roundtrip.hsp"
+expect_error --block-comments=unknown "$test_dir/roundtrip.hsp"
+expect_error --condition-parens=unknown "$test_dir/roundtrip.hsp"
+expect_error --repeat-parens=unknown "$test_dir/roundtrip.hsp"
+expect_error --blank-lines-before-module=17 "$test_dir/roundtrip.hsp"
+expect_error --blank-lines-before-deffunc=-1 "$test_dir/roundtrip.hsp"
+expect_error --blank-lines-before-defcfunc=invalid "$test_dir/roundtrip.hsp"
 cp "$repo/test/invalid.hsp" "$test_dir/invalid.hsp"
 expect_error --write "$test_dir/invalid.hsp"
 cmp "$repo/test/invalid.hsp" "$test_dir/invalid.hsp"
@@ -91,12 +107,12 @@ else
 fi
 
 cd "$test_dir"
-for mode in roundtrip default compact short; do
+for mode in roundtrip $modes; do
     "$hspcmp" -i -u "--compath=$hsp_common/" "-o$test_dir/$mode.ax" "$test_dir/$mode.hsp" > "$test_dir/$mode.compile"
     test -s "$test_dir/$mode.ax"
     "$hsp3cl" "$test_dir/$mode.ax" > "$test_dir/$mode.out"
     tail -n 1 "$test_dir/$mode.out" | grep -Fx 'hspfmt integration ok'
     cmp "$test_dir/roundtrip.out" "$test_dir/$mode.out"
 done
-echo 'CLI checks and four compiler/runtime comparisons passed'
+echo 'CLI checks and all compiler/runtime comparisons passed'
 # The caller can inspect the complete generated sources, bytecode, and outputs.

@@ -66,8 +66,9 @@ struct Frame {
 struct State {
     std::vector<Frame> blocks;
     unsigned function = 0;
+    unsigned label = 0;
     unsigned depth() const {
-        unsigned n = function;
+        unsigned n = std::max(function, label);
         for (const auto &frame : blocks) n += frame.case_body ? 2 : 1;
         return n;
     }
@@ -79,6 +80,159 @@ struct Conditional {
     bool has_else = false;
 };
 
+// A multiline token stays in one logical line. Never split strings or comments
+// into apparent directives/code while applying layout rules.
+struct SourceLine {
+    std::size_t begin, end, first, last;
+    std::string_view newline;
+    bool opaque, directive, multiline;
+};
+
+std::vector<SourceLine> source_lines(std::string_view source, const std::vector<Token> &tokens) {
+    std::vector<SourceLine> lines;
+    std::size_t begin = 0, first = 0;
+    bool disabled = false, continuation = false;
+    auto append = [&](std::size_t end, std::size_t last, std::string_view newline) {
+        auto start = first;
+        while (start < last && (tokens[start].kind == Kind::Space || tokens[start].kind == Kind::Bom)) ++start;
+        while (last > start && tokens[last - 1].kind == Kind::Space) --last;
+        const auto text = [&](std::size_t i) { return source.substr(tokens[i].begin, tokens[i].end - tokens[i].begin); };
+        const bool marker = start + 1 == last && tokens[start].kind == Kind::Comment &&
+            one_of(text(start), {"; hspfmt: off", "; hspfmt: on"});
+        const bool next = start < last && text(last - 1) == "\\";
+        bool multiline = false;
+        for (auto i = start; i < last; ++i)
+            if (text(i).find_first_of("\r\n") != std::string_view::npos) multiline = true;
+        lines.push_back({begin, end, start, last, newline, disabled || continuation || next || marker,
+                         start < last && text(start) == "#", multiline});
+        if (marker) disabled = text(start) == "; hspfmt: off";
+        continuation = next;
+    };
+    for (std::size_t i = 0; i < tokens.size(); ++i) {
+        if (tokens[i].kind != Kind::Newline) continue;
+        append(tokens[i].begin, i, source.substr(tokens[i].begin, tokens[i].end - tokens[i].begin));
+        begin = tokens[i].end;
+        first = i + 1;
+    }
+    if (begin < source.size()) append(source.size(), tokens.size(), "");
+    return lines;
+}
+
+std::string rewrite_comments(std::string_view source, const Options &options) {
+    if (options.comment_style == CommentStyle::Preserve && options.block_comments == BlockComments::Preserve)
+        return std::string(source);
+    const auto tokens = lex(source, options.encoding);
+    const auto lines = source_lines(source, tokens);
+    const auto text = [&](std::size_t i) { return source.substr(tokens[i].begin, tokens[i].end - tokens[i].begin); };
+    const auto standalone = [&](const SourceLine &line) {
+        return !line.opaque && !line.directive && line.first + 1 == line.last &&
+            tokens[line.first].kind == Kind::Comment && text(line.first).find("hspfmt:") == std::string_view::npos;
+    };
+    const auto line_comment = [&](const SourceLine &line) {
+        return standalone(line) && text(line.first).substr(0, 2) != "/*";
+    };
+    const auto body = [&](const SourceLine &line) {
+        const auto comment = text(line.first);
+        return comment.substr(comment[0] == ';' ? 1 : 2);
+    };
+    const std::string prefix = options.comment_style == CommentStyle::C ? "//" : ";";
+    std::string out;
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        const auto &line = lines[i];
+        if (options.block_comments == BlockComments::Block && line_comment(line) &&
+            body(line).find("*/") == std::string_view::npos && body(line).find("/*") == std::string_view::npos) {
+            out.append(source.substr(line.begin, tokens[line.first].begin - line.begin));
+            out += "/*";
+            out.append(body(line));
+            while (i + 1 < lines.size() && line_comment(lines[i + 1]) &&
+                   body(lines[i + 1]).find("*/") == std::string_view::npos &&
+                   body(lines[i + 1]).find("/*") == std::string_view::npos) {
+                out.append(lines[i].newline);
+                out.append(body(lines[++i]));
+            }
+            out += "*/";
+            out.append(source.substr(tokens[lines[i].first].end, lines[i].end - tokens[lines[i].first].end));
+            out.append(lines[i].newline);
+        } else if (options.block_comments == BlockComments::Lines && standalone(line) &&
+                   text(line.first).substr(0, 2) == "/*") {
+            const auto comment = text(line.first);
+            auto content = comment.substr(2, comment.size() - 4);
+            auto indent = source.substr(line.begin, tokens[line.first].begin - line.begin);
+            if (indent.substr(0, 3) == "\xef\xbb\xbf") { out += "\xef\xbb\xbf"; indent.remove_prefix(3); }
+            out.append(indent);
+            out += prefix;
+            for (std::size_t pos = 0; pos < content.size();) {
+                const auto end = content.find_first_of("\r\n", pos);
+                if (end == std::string_view::npos) { out.append(content.substr(pos)); break; }
+                out.append(content.substr(pos, end - pos));
+                auto next = end + 1;
+                if (content[end] == '\r' && next < content.size() && content[next] == '\n') ++next;
+                out.append(content.substr(end, next - end));
+                out.append(indent);
+                out += prefix;
+                pos = next;
+            }
+            out.append(source.substr(tokens[line.first].end, line.end - tokens[line.first].end));
+            out.append(line.newline);
+        } else {
+            std::size_t pos = line.begin;
+            if (!line.opaque && !line.directive && !line.multiline && options.comment_style != CommentStyle::Preserve) {
+                for (auto t = line.first; t < line.last; ++t) {
+                    if (tokens[t].kind != Kind::Comment || text(t).substr(0, 2) == "/*" ||
+                        text(t).find("hspfmt:") != std::string_view::npos) continue;
+                    out.append(source.substr(pos, tokens[t].begin - pos));
+                    out += prefix;
+                    out.append(text(t).substr(text(t)[0] == ';' ? 1 : 2));
+                    pos = tokens[t].end;
+                }
+            }
+            out.append(source.substr(pos, line.end - pos));
+            out.append(line.newline);
+        }
+    }
+    return out;
+}
+
+std::string declaration_spacing(std::string_view source, const Options &options) {
+    if (options.blank_lines_before_module < 0 && options.blank_lines_before_deffunc < 0 &&
+        options.blank_lines_before_defcfunc < 0) return std::string(source);
+    const auto tokens = lex(source, options.encoding);
+    const auto lines = source_lines(source, tokens);
+    std::string out;
+    std::size_t copied = 0;
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        const auto &line = lines[i];
+        if (line.opaque || line.multiline || !line.directive || line.first + 1 >= line.last) continue;
+        const auto &token = tokens[line.first + 1];
+        const auto directive = lower(source.substr(token.begin, token.end - token.begin));
+        int count = -1;
+        if (directive == "module") count = options.blank_lines_before_module;
+        else if (directive == "deffunc") count = options.blank_lines_before_deffunc;
+        else if (directive == "defcfunc") count = options.blank_lines_before_defcfunc;
+        if (count < 0) continue;
+        std::size_t start = i;
+        while (start > 0) {
+            const auto &previous = lines[start - 1];
+            if (previous.opaque || previous.first + 1 != previous.last ||
+                tokens[previous.first].kind != Kind::Comment ||
+                source.substr(tokens[previous.first].begin, tokens[previous.first].end - tokens[previous.first].begin).find("hspfmt:") != std::string_view::npos) break;
+            --start;
+        }
+        const auto content = start;
+        while (start > 0 && !lines[start - 1].opaque && lines[start - 1].first == lines[start - 1].last) --start;
+        if (lines[start].begin < copied) continue;
+        out.append(source.substr(copied, lines[start].begin - copied));
+        // No leading blank lines, including for a file starting with a BOM.
+        const bool at_start = start == 0;
+        if (at_start && source.substr(0, 3) == "\xef\xbb\xbf") out += "\xef\xbb\xbf";
+        const auto newline = start > 0 ? lines[start - 1].newline : line.newline;
+        if (!at_start) for (int n = 0; n < count; ++n) out.append(newline);
+        copied = lines[content].begin;
+        if (at_start && copied == 0 && source.substr(0, 3) == "\xef\xbb\xbf") copied = 3;
+    }
+    out.append(source.substr(copied));
+    return out;
+}
 void close_block(State &state, std::string_view close) {
     if (state.blocks.empty() || state.blocks.back().close != close)
         throw std::runtime_error("unmatched block terminator: " + std::string(close));
@@ -124,6 +278,77 @@ bool binary(std::string_view s) {
     return one_of(s, {"=", "==", "!", "!=", "+", "-", "*", "/", "\\", "&", "|", "^",
                       "&&", "||", "<", ">", "<=", ">=", "<<", ">>", "+=", "-=", "*=",
                       "/=", "\\=", "&=", "|=", "^=", "and", "or", "xor"});
+}
+
+bool wraps_expression(const std::vector<Item> &items, std::size_t begin, std::size_t end) {
+    if (end - begin < 2 || items[begin].text != "(" || items[end - 1].text != ")") return false;
+    int depth = 0;
+    for (auto i = begin; i < end; ++i) {
+        if (items[i].text == "(") ++depth;
+        else if (items[i].text == ")") --depth;
+        if (depth <= 0 && i != end - 1) return false;
+    }
+    return depth == 0;
+}
+
+std::vector<Item> expression_parens(const std::vector<Item> &items, const Options &options) {
+    if (options.condition_parens == Parentheses::Preserve && options.repeat_parens == Parentheses::Preserve)
+        return items;
+    std::vector<Item> result;
+    bool statement = true;
+    for (std::size_t i = 0; i < items.size();) {
+        const auto word = lower(items[i].text);
+        const bool condition = statement && items[i].kind == Kind::Word && (word == "if" || word == "while");
+        const bool repeat = statement && items[i].kind == Kind::Word && word == "repeat";
+        const auto mode = condition ? options.condition_parens : repeat ? options.repeat_parens : Parentheses::Preserve;
+        result.push_back(items[i++]);
+        if (mode != Parentheses::Preserve) {
+            // Only balanced, uninterrupted expressions are eligible. A top-level
+            // comma separates repeat arguments, never their enclosing pair.
+            auto end = i;
+            std::vector<std::string> stack;
+            bool eligible = true;
+            for (; end < items.size(); ++end) {
+                const auto &item = items[end];
+                if (item.kind == Kind::Comment || one_of(item.text, {":", "{", "}"})) break;
+                if (item.text == "(" || item.text == "[") stack.push_back(item.text);
+                else if (item.text == ")" || item.text == "]") {
+                    if (stack.empty() || stack.back() != (item.text == ")" ? "(" : "[")) { eligible = false; break; }
+                    stack.pop_back();
+                } else if (item.text == "," && stack.empty() && !repeat) eligible = false;
+            }
+            if (!stack.empty()) eligible = false;
+            if (end < items.size() && items[end].kind == Kind::Comment && items[end].text.substr(0, 2) == "/*")
+                eligible = false;
+            if (eligible) {
+                auto start = i;
+                int depth = 0;
+                for (auto t = i; t <= end; ++t) {
+                    if (t < end && (items[t].text == "(" || items[t].text == "[")) ++depth;
+                    if (t < end && (items[t].text == ")" || items[t].text == "]")) --depth;
+                    if (t != end && !(repeat && items[t].text == "," && depth == 0)) continue;
+                    auto first = start, last = t;
+                    if (mode == Parentheses::Remove)
+                        while (wraps_expression(items, first, last)) { ++first; --last; }
+                    const bool add = first < last && mode == Parentheses::Add && !wraps_expression(items, first, last);
+                    if (add) result.push_back({Kind::Symbol, "(", true});
+                    for (auto p = first; p < last; ++p) {
+                        auto item = items[p];
+                        if (p == first) item.gap = !add;
+                        result.push_back(std::move(item));
+                    }
+                    if (add) result.push_back({Kind::Symbol, ")", false});
+                    if (t < end) result.push_back(items[t]);
+                    start = t + 1;
+                }
+                i = end;
+            }
+        }
+        const auto &previous = items[i - 1];
+        if (one_of(previous.text, {":", "{", "}"})) statement = true;
+        else if (previous.kind != Kind::Comment) statement = word == "else";
+    }
+    return result;
 }
 
 std::string print_items(const std::vector<Item> &items, const Options &options) {
@@ -241,7 +466,7 @@ std::vector<Item> short_if(std::vector<Item> items, const Options &options, unsi
             result.erase(result.begin() + 1);
         }
     }
-    if (print_items(result, options).size() + depth * options.indent_width > options.line_width) return items;
+    if (print_items(expression_parens(result, options), options).size() + depth * options.indent_width > options.line_width) return items;
     return result;
 }
 
@@ -323,6 +548,14 @@ std::vector<Token> lex(std::string_view s, Encoding encoding) {
 
 std::string format(std::string_view source, const Options &options) {
     if (options.indent_width > 16) throw std::runtime_error("indent width must be between 0 and 16");
+    for (const auto count : {options.blank_lines_before_module, options.blank_lines_before_deffunc,
+                             options.blank_lines_before_defcfunc})
+        if (count < -1 || count > 16) throw std::runtime_error("blank line count must be between 0 and 16, or -1 to preserve");
+    std::string rewritten;
+    if (options.comment_style != CommentStyle::Preserve || options.block_comments != BlockComments::Preserve) {
+        rewritten = rewrite_comments(source, options);
+        source = rewritten;
+    }
     const auto tokens = lex(source, options.encoding);
     State state;
     std::vector<Conditional> conditionals;
@@ -344,6 +577,7 @@ std::string format(std::string_view source, const Options &options) {
             if (items[0].text == "; hspfmt: on") { disabled = false; preserve = true; }
         }
         const bool opaque = continuation || next_continuation || was_disabled || disabled;
+        const bool label = items.size() >= 2 && items[0].text == "*" && items[1].kind == Kind::Word;
         if (!opaque && !items.empty() && items[0].text == "#") {
             preserve = true;
             const std::string directive = items.size() > 1 ? lower(items[1].text) : "";
@@ -355,6 +589,7 @@ std::string format(std::string_view source, const Options &options) {
                 if (c.has_else) throw std::runtime_error("branch after #else");
                 if (c.has_branch && c.branch.blocks != state.blocks) throw std::runtime_error("conditional branches have different block structure");
                 if (c.has_branch) state.function = std::max(state.function, c.branch.function);
+                if (c.has_branch) state.label = std::max(state.label, c.branch.label);
                 c.branch = state;
                 c.has_branch = true;
                 c.has_else = directive == "else";
@@ -367,12 +602,16 @@ std::string format(std::string_view source, const Options &options) {
                     throw std::runtime_error("conditional branches have different block structure");
                 if (c.has_branch) state.function = std::max(state.function, c.branch.function);
                 if (!c.has_else) state.function = std::max(state.function, c.before.function);
+                if (c.has_branch) state.label = std::max(state.label, c.branch.label);
+                if (!c.has_else) state.label = std::max(state.label, c.before.label);
             } else if (one_of(directive, {"deffunc", "defcfunc", "modfunc", "modcfunc", "modinit", "modterm"})) {
                 if (!state.blocks.empty()) throw std::runtime_error("function declaration inside open block");
                 state.function = 1;
+                state.label = 0;
             } else if (directive == "global" || directive == "module") {
                 if (!state.blocks.empty()) throw std::runtime_error("module boundary inside open block");
                 state.function = 0;
+                state.label = 0;
             }
         } else if (!preserve) {
             State line_state = state;
@@ -382,14 +621,15 @@ std::string format(std::string_view source, const Options &options) {
                 else if ((first == "case" || first == "default") && !line_state.blocks.empty())
                     line_state.blocks.back().case_body = false;
             }
-            const bool label = items.size() >= 2 && items[0].text == "*" && items[1].kind == Kind::Word;
             const unsigned depth = label ? 0 : line_state.depth();
             auto printed = short_if(items, options, depth);
+            printed = expression_parens(printed, options);
             if (!items.empty()) {
                 out.append(options.tabs ? depth : depth * options.indent_width, options.tabs ? '\t' : ' ');
                 out += print_items(printed, options);
             }
         }
+        if (!opaque && label && options.indent_labels) state.label = 1;
         if (!opaque && (items.empty() || items[0].text != "#")) parse_line(items, state);
         if (preserve) out.append(raw);
         out.append(newline);
@@ -414,7 +654,7 @@ std::string format(std::string_view source, const Options &options) {
     if (begin < source.size()) flush(source.size(), "");
     if (!conditionals.empty()) throw std::runtime_error("unterminated preprocessor conditional");
     if (!state.blocks.empty()) throw std::runtime_error("unterminated block, expected " + state.blocks.back().close);
-    return out;
+    return declaration_spacing(out, options);
 }
 
 } // namespace hspfmt

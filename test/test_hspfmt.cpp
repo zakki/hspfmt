@@ -15,9 +15,9 @@ void expect(const std::string &input, const std::string &expected, hspfmt::Optio
         throw std::runtime_error("case " + std::to_string(count) + "\nexpected:\n" + expected + "\nactual:\n" + actual);
     if (hspfmt::format(actual, options) != actual) throw std::runtime_error("not idempotent: " + actual);
 }
-void rejects(const std::string &input) {
+void rejects(const std::string &input, hspfmt::Options options = {}) {
     ++count;
-    try { hspfmt::format(input); } catch (const std::runtime_error &) { return; }
+    try { hspfmt::format(input, options); } catch (const std::runtime_error &) { return; }
     throw std::runtime_error("expected rejection: " + input);
 }
 }
@@ -74,6 +74,86 @@ int main() {
         options = {};
         options.encoding = hspfmt::Encoding::Cp932;
         expect("mes \"\x95\x5c\"\r\na=1\r\n", "mes \"\x95\x5c\"\r\na = 1\r\n", options);
+        options = {};
+        options.indent_labels = true;
+        expect("*main\na=1\ngoto *next\nreturn\na=2\n*next\nrepeat 2\na++\nloop\n",
+               "*main\n    a = 1\n    goto *next\n    return\n    a = 2\n*next\n    repeat 2\n        a++\n    loop\n", options);
+        expect("*main\nx=1\n#deffunc f\n*local\nx=2\n#global\nx=3\n",
+               "*main\n    x = 1\n#deffunc f\n*local\n    x = 2\n#global\nx = 3\n", options);
+        expect("#if A\n*one\n#else\n*two\n#endif\nx=1\n", "#if A\n*one\n#else\n*two\n#endif\n    x = 1\n", options);
+        expect("*main /* docs\nmore */\nx=1\n", "*main /* docs\nmore */\n    x = 1\n", options);
+        options.tabs = true;
+        expect("*main\nrepeat\nx=1\nloop\n", "*main\n\trepeat\n\t\tx = 1\n\tloop\n", options);
+        options = {};
+        options.comment_style = hspfmt::CommentStyle::Basic;
+        expect("// hello\nx=1 // tail\nmes \"// stays\"\n", "; hello\nx = 1 ; tail\nmes \"// stays\"\n", options);
+        expect("#define f x // stays\nx = 1 + \\\n  2 // stays\n", "#define f x // stays\nx = 1 + \\\n  2 // stays\n", options);
+        expect("// hspfmt: off\nx=1\n", "// hspfmt: off\nx = 1\n", options);
+        options.comment_style = hspfmt::CommentStyle::C;
+        expect("; hello\nx=1 ; tail\n; hspfmt: off\nx=2 ; kept\n; hspfmt: on\nx=3\n",
+               "// hello\nx = 1 // tail\n; hspfmt: off\nx=2 ; kept\n; hspfmt: on\nx = 3\n", options);
+        options.block_comments = hspfmt::BlockComments::Lines;
+        expect("/* hello\n world\n*/\nx=1\n", "// hello\n// world\n//\nx = 1\n", options);
+        expect("x=1 /* inline */ : x=2\n", "x = 1 /* inline */ : x = 2\n", options);
+        expect("/* head */ x=1\n", "/* head */ x = 1\n", options);
+        expect("if x { /* multiline\n kept */\nx=1\n}\n", "if x { /* multiline\n kept */\n    x = 1\n}\n", options);
+        expect("\xef\xbb\xbf" "/* head\r\n tail*/", "\xef\xbb\xbf" "// head\r\n// tail", options);
+        expect("/* hspfmt: off */\nx=1\n", "/* hspfmt: off */\nx = 1\n", options);
+        options.comment_style = hspfmt::CommentStyle::Basic;
+        expect("repeat\n/* a\nb*/\nloop\n", "repeat\n    ; a\n    ;b\nloop\n", options);
+        options = {};
+        options.block_comments = hspfmt::BlockComments::Block;
+        expect("; a\n// b\nx=1\n", "/* a\n b*/\nx = 1\n", options);
+        expect("; a\r\n; b", "/* a\r\n b*/", options);
+        expect("; a */ b\n; c /* d\n; safe\n", "; a */ b\n; c /* d\n/* safe*/\n", options);
+        expect("x=1 ; tail\n; hspfmt: off\n; kept\n; hspfmt: on\n", "x = 1 ; tail\n; hspfmt: off\n; kept\n; hspfmt: on\n", options);
+        options = {};
+        options.condition_parens = hspfmt::Parentheses::Add;
+        expect("if a+b>0 : x=1\nwhile flag\nx=2\nwend\n", "if (a + b > 0) : x = 1\nwhile (flag)\n    x = 2\nwend\n", options);
+        expect("if (a) and (b) { if x : y=1 }\n", "if ((a) and (b)) { if (x) : y = 1 }\n", options);
+        expect("if f(1,2) : x=1 ; tail\n", "if (f(1, 2)) : x = 1 ; tail\n", options);
+        expect("if a {\nx=1\n} else if b {\nx=2\n}\n", "if (a) {\n    x = 1\n} else if (b) {\n    x = 2\n}\n", options);
+        expect("while\nx=1\nwend\n", "while\n    x = 1\nwend\n", options);
+        expect("if flag /* inline */ : x=1\n", "if flag /* inline */ : x = 1\n", options);
+        expect("#if X\nx=1\n#endif\n", "#if X\nx = 1\n#endif\n", options);
+        options.short_if = true;
+        expect("if (a) { x=1 }\n", "if (a) : x = 1\n", options);
+        options.line_width = 16;
+        expect("if flag { x=1 }\n", "if (flag) { x = 1 }\n", options);
+        options = {};
+        options.condition_parens = hspfmt::Parentheses::Remove;
+        expect("if ((flag)) : x=1\nwhile ((a)+(b))\nx=2\nwend\n", "if flag : x = 1\nwhile (a) +(b)\n    x = 2\nwend\n", options);
+        expect("if (-a) : x=1\nif (a) & (b) : y=1\n", "if -a : x = 1\nif (a) & (b) : y = 1\n", options);
+        options = {};
+        options.repeat_parens = hspfmt::Parentheses::Add;
+        expect("repeat n+1, f(1,2)\nx=1\nloop\nrepeat ,2\nloop\nrepeat\nloop\n",
+               "repeat (n + 1), (f(1, 2))\n    x = 1\nloop\nrepeat , (2)\nloop\nrepeat\nloop\n", options);
+        options.repeat_parens = hspfmt::Parentheses::Remove;
+        expect("repeat ((n+1)), (f(1,2))\nloop\n", "repeat n + 1, f(1, 2)\nloop\n", options);
+        options = {};
+        options.blank_lines_before_module = 2;
+        options.blank_lines_before_deffunc = 1;
+        options.blank_lines_before_defcfunc = 0;
+        expect("\n\n; module docs\n#module m\n\n\n; function docs\n#deffunc f\nx=1\n\n#defcfunc g\nreturn 1\n#global\n#module n\n",
+               "; module docs\n#module m\n\n; function docs\n#deffunc f\n    x = 1\n#defcfunc g\n    return 1\n#global\n\n\n#module n\n", options);
+        expect("\xef\xbb\xbf" "\r\n\r\n#module m\r\nx=1\r\n#deffunc f",
+               "\xef\xbb\xbf" "#module m\r\nx = 1\r\n\r\n#deffunc f", options);
+        expect("\xef\xbb\xbf" "; docs\n#module m\n", "\xef\xbb\xbf" "; docs\n#module m\n", options);
+        expect("x=1\n/* docs\nmore */\n#deffunc f\nreturn\n", "x = 1\n\n/* docs\nmore */\n#deffunc f\n    return\n", options);
+        expect("s={\"\n#module text\n\"}\n; hspfmt: off\n#module kept\n; hspfmt: on\n#module m\n",
+               "s={\"\n#module text\n\"}\n; hspfmt: off\n#module kept\n; hspfmt: on\n\n\n#module m\n", options);
+        options.comment_style = hspfmt::CommentStyle::Basic;
+        options.block_comments = hspfmt::BlockComments::Lines;
+        expect("x=1\n/* docs\nmore */\n#deffunc f\nreturn\n", "x = 1\n\n; docs\n;more \n#deffunc f\n    return\n", options);
+        options = {};
+        options.encoding = hspfmt::Encoding::Cp932;
+        options.comment_style = hspfmt::CommentStyle::C;
+        expect("; \x95\x5c\r\n", "// \x95\x5c\r\n", options);
+        options = {};
+        options.blank_lines_before_module = 17;
+        rejects("#module m\n", options);
+        options.blank_lines_before_module = -2;
+        rejects("#module m\n", options);
         rejects("mes \"unterminated");
         rejects("/* unterminated");
         rejects("while x\nx=1\n");

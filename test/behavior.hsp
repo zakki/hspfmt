@@ -1,4 +1,5 @@
 ; Exercise both sides of conditionals, including statements after a block.
+*main
 repeat 2
 flag=cnt
 foo=0:baz=0
@@ -29,5 +30,39 @@ swend
 mes $00ff+%0010
 mes 0x00ff+0b0010
 mes 1.0e-2
+repeat 2,1
+mes cnt
+loop
+repeat ,1
+mes cnt
+break
+loop
+while
+_break
+wend
+if ((x=2)) : mes "parentheses ok"
+/* standalone
+ block comment */
+fmt_report
+mes fmt_increment(4)
+gosub *report
 mes "hspfmt integration ok"
 end
+
+*report
+mes "label ok" ; trailing comment
+return
+
+/* module documentation
+ stays with the declaration */
+#module fmt_module
+; command documentation
+; second documentation line
+#deffunc fmt_report
+mes "function ok"
+return
+
+; function documentation
+#defcfunc fmt_increment int p_value
+return p_value+1
+#global

@@ -9,6 +9,9 @@ namespace hspfmt {
 
 enum class Encoding { Utf8, Cp932 };
 enum class Kind { Space, Newline, Word, Number, String, Comment, Symbol, Bom };
+enum class CommentStyle { Preserve, Basic, C };
+enum class BlockComments { Preserve, Lines, Block };
+enum class Parentheses { Preserve, Add, Remove };
 
 // Every byte belongs to exactly one token, including trivia and the BOM.
 struct Token {
@@ -25,6 +28,15 @@ struct Options {
     bool hsp_numeric_prefixes = false;
     bool short_if = false;
     unsigned line_width = 100;
+    bool indent_labels = false;
+    CommentStyle comment_style = CommentStyle::Preserve;
+    BlockComments block_comments = BlockComments::Preserve;
+    Parentheses condition_parens = Parentheses::Preserve;
+    Parentheses repeat_parens = Parentheses::Preserve;
+    // -1 preserves existing blank lines; otherwise use exactly this count.
+    int blank_lines_before_module = -1;
+    int blank_lines_before_deffunc = -1;
+    int blank_lines_before_defcfunc = -1;
 };
 
 // Invalid/unterminated input throws std::runtime_error. No source is modified.
