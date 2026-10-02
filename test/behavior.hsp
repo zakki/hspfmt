@@ -41,6 +41,33 @@ while
 _break
 wend
 if ((x=2)) : mes "parentheses ok"
+probe_a=6:probe_b=3
+mes probe_a&probe_b
+mes probe_a&&probe_b
+mes probe_a|probe_b
+mes probe_a||probe_b
+mes probe_a!probe_b
+mes probe_a!=probe_b
+mes probe_a=probe_b
+mes probe_a==probe_b
+probe_equal=probe_a=probe_b
+mes probe_equal
+dim probe_array,2
+probe_array(0)=1:probe_array(1)=3
+probe_array(0)+:probe_array(1)--
+mes probe_array(0),probe_array(1)
+probe_array.0++:probe_array.(1)-
+mes probe_array(0),probe_array(1)
+probe_a+:probe_a++:probe_b-:probe_b--
+mes probe_a,probe_b
+probe_a&=3:probe_b|=2
+mes probe_a,probe_b
+probe_hits@fmt_module=0
+mes 0&&fmt_probe()
+mes probe_hits@fmt_module
+mes 1||fmt_probe()
+mes probe_hits@fmt_module
+mes "operator text: && || != == ++ --"
 /* standalone
  block comment */
 fmt_report
@@ -65,4 +92,8 @@ return
 ; function documentation
 #defcfunc fmt_increment int p_value
 return p_value+1
+
+#defcfunc fmt_probe
+probe_hits++
+return 1
 #global

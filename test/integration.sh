@@ -26,7 +26,7 @@ trap 'echo "hspfmt integration artifacts: $test_dir" >&2' EXIT
 "$formatter" --roundtrip "$repo/test/behavior.hsp" > "$test_dir/roundtrip.hsp"
 cmp "$repo/test/behavior.hsp" "$test_dir/roundtrip.hsp"
 
-modes='default compact short parens-add parens-remove comments-semicolon comments-c comments-block labels declarations combined'
+modes='default compact short parens-add parens-remove comments-semicolon comments-c comments-block labels declarations operator-hsp operator-c increment-hsp increment-c operators-compact operators-hsp combined'
 for mode in $modes; do
     case "$mode" in
         default) set -- ;;
@@ -39,7 +39,13 @@ for mode in $modes; do
         comments-block) set -- --block-comments=block ;;
         labels) set -- --indent-labels ;;
         declarations) set -- --blank-lines-before-module=2 --blank-lines-before-deffunc=1 --blank-lines-before-defcfunc=0 ;;
-        combined) set -- --indent-labels --comment-style=semicolon --block-comments=lines --condition-parens=add --repeat-parens=add --short-if --blank-lines-before-module=2 --blank-lines-before-deffunc=1 --blank-lines-before-defcfunc=1 ;;
+        operator-hsp) set -- --operator-style=hsp ;;
+        operator-c) set -- --operator-style=c ;;
+        increment-hsp) set -- --increment-style=hsp ;;
+        increment-c) set -- --increment-style=c ;;
+        operators-compact) set -- --operator-style=hsp --increment-style=c --compact-operators ;;
+        operators-hsp) set -- --operator-style=hsp --increment-style=hsp ;;
+        combined) set -- --indent-labels --comment-style=semicolon --block-comments=lines --condition-parens=add --repeat-parens=add --short-if --operator-style=c --increment-style=c --blank-lines-before-module=2 --blank-lines-before-deffunc=1 --blank-lines-before-defcfunc=1 ;;
     esac
     "$formatter" "$@" "$repo/test/behavior.hsp" > "$test_dir/$mode.hsp"
     "$formatter" "$@" --check "$test_dir/$mode.hsp"
@@ -77,6 +83,8 @@ expect_error --write --check "$test_dir/roundtrip.hsp"
 expect_error --write --roundtrip "$test_dir/roundtrip.hsp"
 expect_error --comment-style=unknown "$test_dir/roundtrip.hsp"
 expect_error --comment-style=basic "$test_dir/roundtrip.hsp"
+expect_error --operator-style=unknown "$test_dir/roundtrip.hsp"
+expect_error --increment-style=unknown "$test_dir/roundtrip.hsp"
 expect_error --block-comments=unknown "$test_dir/roundtrip.hsp"
 expect_error --condition-parens=unknown "$test_dir/roundtrip.hsp"
 expect_error --repeat-parens=unknown "$test_dir/roundtrip.hsp"

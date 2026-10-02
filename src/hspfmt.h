@@ -12,6 +12,7 @@ enum class Kind { Space, Newline, Word, Number, String, Comment, Symbol, Bom };
 enum class CommentStyle { Preserve, Semicolon, C };
 enum class BlockComments { Preserve, Lines, Block };
 enum class Parentheses { Preserve, Add, Remove };
+enum class OperatorStyle { Preserve, Hsp, C };
 
 // Every byte belongs to exactly one token, including trivia and the BOM.
 struct Token {
@@ -37,6 +38,8 @@ struct Options {
     int blank_lines_before_module = -1;
     int blank_lines_before_deffunc = -1;
     int blank_lines_before_defcfunc = -1;
+    OperatorStyle operator_style = OperatorStyle::Preserve;
+    OperatorStyle increment_style = OperatorStyle::Preserve;
 };
 
 // Invalid/unterminated input throws std::runtime_error. No source is modified.

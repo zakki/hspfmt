@@ -150,6 +150,59 @@ int main() {
         options.comment_style = hspfmt::CommentStyle::C;
         expect("; \x95\x5c\r\n", "// \x95\x5c\r\n", options);
         options = {};
+        options.operator_style = hspfmt::OperatorStyle::C;
+        expect("a=b\nx=a=b\nif a=b & a!c | b=c : x=1\n",
+               "a = b\nx = a == b\nif a == b && a != c || b == c : x = 1\n", options);
+        expect("mes (a)=b\nwhile (a)=b\na-=1\nwend\n", "mes (a) == b\nwhile (a) == b\n    a -= 1\nwend\n", options);
+        expect("a(0)=b=c\na@mod=1\na.0=2\na.(i+1)=3\n",
+               "a(0) = b == c\na@mod = 1\na.0 = 2\na.(i + 1) = 3\n", options);
+        expect("a (i=j)=b!c\n", "a (i == j) = b != c\n", options);
+        expect("a /* lhs */ = b /* rhs */ = c\n", "a /* lhs */ = b /* rhs */ == c\n", options);
+        expect("a&=b:c|=d\na & b=c\n", "a &= b : c |= d\na & b == c\n", options);
+        expect("foo (a)=b\n", "foo (a) = b\n", options);
+        expect("if a=b { x=1 } else if c!d { x=2 }\n", "if a == b { x = 1 } else if c != d { x = 2 }\n", options);
+        expect("mes \"a=b & c!d\" ; a=b\n#define f(%1) %1=1\nf 1\n",
+               "mes \"a=b & c!d\" ; a=b\n#define f(%1) %1=1\nf 1\n", options);
+        expect("; hspfmt: off\na=b=c\n; hspfmt: on\nx=1 + \\\n a=b\n",
+               "; hspfmt: off\na=b=c\n; hspfmt: on\nx=1 + \\\n a=b\n", options);
+        expect("mes !a\nx=a!\n", "mes ! a\nx = a !\n", options);
+        options.binary_spaces = false;
+        expect("x=a=b & c! -d\n", "x=a==b&&c!=-d\n", options);
+        options = {};
+        options.operator_style = hspfmt::OperatorStyle::Hsp;
+        expect("a=b\nx=a==b\nif a==b && a!=c || b==c : x=1\n",
+               "a = b\nx = a = b\nif a = b & a ! c | b = c : x = 1\n", options);
+        expect("x==b\na(0)==b==c\n", "x == b\na(0) == b = c\n", options);
+        expect("x=a<=b && a>=b\na+=1\n", "x = a <= b & a >= b\na += 1\n", options);
+        options.binary_spaces = false;
+        expect("x = a == b && c != -d\n", "x=a=b&c!-d\n", options);
+        options = {};
+        options.increment_style = hspfmt::OperatorStyle::C;
+        expect("a+:b-\na(0)+\na@mod-\na.0+\na.(i+1)-\n",
+               "a++ : b--\na(0)++\na@mod--\na.0++\na.(i + 1)--\n", options);
+        expect("if flag : a+\nif flag { a- }\n", "if flag : a++\nif flag { a-- }\n", options);
+        expect("a /* lhs */ + /* tail */\n", "a /* lhs */++ /* tail */\n", options);
+        expect("a+2\na+=2\nx=a+b\nmes a+\nx=a++\n++a\n", "a +2\na += 2\nx = a + b\nmes a+\nx = a++\n++ a\n", options);
+        expect("a+ /* middle */ +b\n", "a+ /* middle */ +b\n", options);
+        options = {};
+        options.increment_style = hspfmt::OperatorStyle::Hsp;
+        expect("a++:b--\na(0)++\na@mod--\na.0++\n", "a+ : b-\na(0)+\na@mod-\na.0+\n", options);
+        expect("x=a++\nmes a--\n++a\na+=2\n", "x = a++\nmes a--\n++ a\na += 2\n", options);
+        options = {};
+        options.operator_style = hspfmt::OperatorStyle::C;
+        options.increment_style = hspfmt::OperatorStyle::C;
+        options.short_if = true;
+        options.condition_parens = hspfmt::Parentheses::Add;
+        expect("if a=b { x=c!d }\nif a=b : a+\n", "if (a == b) : x = c != d\nif (a == b) : a++\n", options);
+        options.line_width = 23;
+        expect("if a=b { x=c!d }\n", "if (a == b) { x = c != d }\n", options);
+        options = {};
+        options.encoding = hspfmt::Encoding::Cp932;
+        options.operator_style = hspfmt::OperatorStyle::C;
+        options.increment_style = hspfmt::OperatorStyle::C;
+        expect("\xef\xbb\xbf" "a=b=c\r\na+", "\xef\xbb\xbf" "a = b == c\r\na++", options);
+        expect("mes \"\x95\x5c\" ; ==\r\na+\r\n", "mes \"\x95\x5c\" ; ==\r\na++\r\n", options);
+        options = {};
         options.blank_lines_before_module = 17;
         rejects("#module m\n", options);
         options.blank_lines_before_module = -2;

@@ -280,6 +280,98 @@ bool binary(std::string_view s) {
                       "/=", "\\=", "&=", "|=", "^=", "and", "or", "xor"});
 }
 
+std::size_t next_code(const std::vector<Item> &items, std::size_t pos, std::size_t end) {
+    while (pos < end && items[pos].kind == Kind::Comment) ++pos;
+    return pos;
+}
+
+// Recognize only a variable-shaped statement head. This protects assignment
+// operators and permits increments on array elements and qualified variables.
+// A parenthesized argument to an unknown command is ambiguous and is preserved.
+std::size_t variable_end(const std::vector<Item> &items, std::size_t begin, std::size_t end) {
+    if (begin == end || items[begin].kind != Kind::Word ||
+        one_of(lower(items[begin].text), {"if", "else", "while", "until", "repeat", "foreach", "for",
+                                        "switch", "case", "return", "mes", "print", "logmes"})) return begin;
+    auto pos = next_code(items, begin + 1, end);
+    while (pos < end) {
+        if (items[pos].text == "@") {
+            const auto name = next_code(items, pos + 1, end);
+            if (name == end || items[name].kind != Kind::Word) return begin;
+            pos = next_code(items, name + 1, end);
+        } else if (items[pos].text == ".") {
+            pos = next_code(items, pos + 1, end);
+            if (pos == end) return begin;
+            if (items[pos].kind == Kind::Word || items[pos].kind == Kind::Number) {
+                pos = next_code(items, pos + 1, end);
+                continue;
+            }
+            if (items[pos].text != "(") return begin;
+        } else if (items[pos].text != "(") break;
+        if (pos < end && items[pos].text == "(") {
+            int depth = 0;
+            do {
+                if (items[pos].text == "(") ++depth;
+                else if (items[pos].text == ")") --depth;
+                ++pos;
+            } while (pos < end && depth > 0);
+            if (depth != 0) return begin;
+            pos = next_code(items, pos, end);
+        }
+    }
+    return pos;
+}
+
+std::vector<Item> operator_spelling(std::vector<Item> items, const Options &options) {
+    if (options.operator_style == OperatorStyle::Preserve && options.increment_style == OperatorStyle::Preserve)
+        return items;
+    for (std::size_t begin = 0; begin < items.size();) {
+        auto end = begin;
+        while (end < items.size() && !(items[end].kind == Kind::Symbol && one_of(items[end].text, {":", "{", "}"}))) ++end;
+        const auto start = next_code(items, begin, end);
+        const auto target = variable_end(items, start, end);
+        // The first operator after a variable is a statement operator: x = ...,
+        // x += ..., or the legacy x & ... form. Expressions inside the variable's
+        // subscripts and to the right of this operator remain eligible.
+        const bool variable_statement = target > start && target < end &&
+            (binary(items[target].text) || one_of(items[target].text, {"++", "--"}));
+        if (variable_statement && options.increment_style != OperatorStyle::Preserve &&
+            one_of(items[target].text, {"+", "-", "++", "--"}) && next_code(items, target + 1, end) == end) {
+            const bool plus = items[target].text[0] == '+';
+            items[target].text = options.increment_style == OperatorStyle::Hsp ? (plus ? "+" : "-") : (plus ? "++" : "--");
+        }
+        if (options.operator_style != OperatorStyle::Preserve) {
+            for (auto i = start; i < end; ++i) {
+                if (items[i].kind != Kind::Symbol || (variable_statement && i == target)) continue;
+                auto left = i;
+                while (left > start && items[left - 1].kind == Kind::Comment) --left;
+                const auto right = next_code(items, i + 1, end);
+                if (left == start || right == end || left - 1 == start) continue;
+                const auto &before = items[left - 1];
+                const auto &after = items[right];
+                const bool operand_before = (before.kind == Kind::Word && !binary(lower(before.text))) ||
+                    before.kind == Kind::Number || before.kind == Kind::String || one_of(before.text, {")", "]"});
+                const bool operand_after = (after.kind == Kind::Word && !binary(lower(after.text))) ||
+                    after.kind == Kind::Number || after.kind == Kind::String || one_of(after.text, {"(", "[", "-", "+", "*"});
+                if (!operand_before || !operand_after) continue;
+                auto &text = items[i].text;
+                if (options.operator_style == OperatorStyle::Hsp) {
+                    if (text == "&&") text = "&";
+                    else if (text == "||") text = "|";
+                    else if (text == "!=") text = "!";
+                    else if (text == "==") text = "=";
+                } else {
+                    if (text == "&") text = "&&";
+                    else if (text == "|") text = "||";
+                    else if (text == "!") text = "!=";
+                    else if (text == "=") text = "==";
+                }
+            }
+        }
+        begin = end == items.size() ? end : end + 1;
+    }
+    return items;
+}
+
 bool wraps_expression(const std::vector<Item> &items, std::size_t begin, std::size_t end) {
     if (end - begin < 2 || items[begin].text != "(" || items[end - 1].text != ")") return false;
     int depth = 0;
@@ -466,7 +558,7 @@ std::vector<Item> short_if(std::vector<Item> items, const Options &options, unsi
             result.erase(result.begin() + 1);
         }
     }
-    if (print_items(expression_parens(result, options), options).size() + depth * options.indent_width > options.line_width) return items;
+    if (print_items(operator_spelling(expression_parens(result, options), options), options).size() + depth * options.indent_width > options.line_width) return items;
     return result;
 }
 
@@ -624,6 +716,7 @@ std::string format(std::string_view source, const Options &options) {
             const unsigned depth = label ? 0 : line_state.depth();
             auto printed = short_if(items, options, depth);
             printed = expression_parens(printed, options);
+            printed = operator_spelling(std::move(printed), options);
             if (!items.empty()) {
                 out.append(options.tabs ? depth : depth * options.indent_width, options.tabs ? '\t' : ' ');
                 out += print_items(printed, options);

@@ -71,6 +71,13 @@ int blank_lines(const std::string &s) {
     if (value > 16) throw std::runtime_error("blank line count must be between 0 and 16");
     return static_cast<int>(value);
 }
+
+hspfmt::OperatorStyle operator_style(const std::string &s) {
+    if (s == "preserve") return hspfmt::OperatorStyle::Preserve;
+    if (s == "hsp") return hspfmt::OperatorStyle::Hsp;
+    if (s == "c") return hspfmt::OperatorStyle::C;
+    throw std::runtime_error("invalid operator style: " + s);
+}
 }
 
 int main(int argc, char **argv) {
@@ -91,6 +98,8 @@ int main(int argc, char **argv) {
             else if (!positional && arg == "--compact-operators") options.binary_spaces = false;
             else if (!positional && arg == "--hsp-prefixes") options.hsp_numeric_prefixes = true;
             else if (!positional && arg == "--short-if") options.short_if = true;
+            else if (!positional && arg.rfind("--operator-style=", 0) == 0) options.operator_style = operator_style(arg.substr(17));
+            else if (!positional && arg.rfind("--increment-style=", 0) == 0) options.increment_style = operator_style(arg.substr(18));
             else if (!positional && arg == "--indent-labels") options.indent_labels = true;
             else if (!positional && arg == "--no-indent-labels") options.indent_labels = false;
             else if (!positional && arg.rfind("--comment-style=", 0) == 0) {
@@ -125,6 +134,8 @@ int main(int argc, char **argv) {
                     "  --indent=N --tabs    Indentation (default: 4 spaces)\n"
                     "  --compact-operators Remove optional binary-operator spaces\n"
                     "  --hsp-prefixes       Convert 0x/0b to $/% (preserve digits)\n"
+                    "  --operator-style=preserve|hsp|c (binary operator spelling)\n"
+                    "  --increment-style=preserve|hsp|c (increment/decrement statements)\n"
                     "  --short-if           Collapse isolated single-line assignment if blocks\n"
                     "  --line-width=N       Short-if byte width limit (default: 100)\n"
                     "  --indent-labels / --no-indent-labels (default: no indentation)\n"

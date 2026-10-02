@@ -34,6 +34,8 @@ Visual Studioなどの複数構成ジェネレータでは、実行ファイル�
 | `--tabs` | 1段につきタブ1文字 |
 | `--compact-operators` | 二項演算子の任意の空白を除去。トークンの結合を防ぐ空白は残す |
 | `--hsp-prefixes` | 通常コードの `0x` を `$`、`0b` を `%` に変更。桁数・大小文字・桁区切りは維持 |
+| `--operator-style=preserve\|hsp\|c` | 二項演算子の表記を維持／HSP／Cスタイルに統一。既定は維持 |
+| `--increment-style=preserve\|hsp\|c` | 増減文の表記を維持／`a+`・`a-`／`a++`・`a--` に統一。既定は維持 |
 | `--short-if` | 独立した一行の代入のみの `if` ブロックをコロン形式に変換 |
 | `--line-width=N` | コロン化する行の上限。既定100。インデント込みのバイト数で数える |
 | `--encoding=utf8` | UTF-8を検証して処理。既定値 |
@@ -73,6 +75,17 @@ build/hspfmt --indent-labels --comment-style=semicolon --block-comments=lines \
   --condition-parens=remove --repeat-parens=remove \
   --blank-lines-before-module=2 --blank-lines-before-deffunc=1 \
   --blank-lines-before-defcfunc=1 script.hsp
+```
+
+`--operator-style` は式中の `&`／`&&`、`|`／`||`、`!`／`!=`、`=`／`==` を切り替えます。代入・複合代入の演算子は保持し、代入の右辺や配列の添字にある比較は変換します。例えば `--operator-style=c` では `x=a=b` を `x = a == b` にします。HSPの `&&` と `||` は `&` と `|` の別表記なので、Cスタイルにしてもビット演算のままで、短絡評価にはなりません。`and`・`or` などの単語による演算子は変換しません。
+
+`--increment-style` は文全体が変数または配列要素への増減である場合に適用します。式中の加減算、`a+2` のような省略形の加算代入、`+=`・`-=` は変換しません。HSPでは増減は文であり、`x=a++` や `++a` を有効な構文に修復する処理も行いません。
+
+命令と変数の名前解決は行わないため、未知の `foo (a)=b` のように配列への代入とも命令引数の比較とも解釈できる形式では、文頭の変数に続く最初の演算子を保持します。文字列・コメント・プリプロセッサ行・行継続・整形無効領域内の演算子は変更しません。
+
+```sh
+build/hspfmt --operator-style=c --increment-style=c script.hsp
+build/hspfmt --operator-style=hsp --increment-style=hsp script.hsp
 ```
 
 ## ソース保持と制約
