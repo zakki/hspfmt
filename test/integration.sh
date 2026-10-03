@@ -26,6 +26,40 @@ trap 'echo "hspfmt integration artifacts: $test_dir" >&2' EXIT
 "$formatter" --roundtrip "$repo/test/behavior.hsp" > "$test_dir/roundtrip.hsp"
 cmp "$repo/test/behavior.hsp" "$test_dir/roundtrip.hsp"
 
+# Ambiguous spacing is preserved and reported on stderr, including in check/write.
+printf 'foo*bar\n' > "$test_dir/ambiguous.hsp"
+printf '%s:1: warning: ambiguous label or multiplication; preserving whitespace\nfoo*bar\n' \
+    "$test_dir/ambiguous.hsp" > "$test_dir/ambiguous.expected-stderr"
+"$formatter" "$test_dir/ambiguous.hsp" > "$test_dir/ambiguous.out" 2> "$test_dir/ambiguous.stderr"
+cmp "$test_dir/ambiguous.hsp" "$test_dir/ambiguous.out"
+cmp "$test_dir/ambiguous.expected-stderr" "$test_dir/ambiguous.stderr"
+"$formatter" --check "$test_dir/ambiguous.hsp" > "$test_dir/ambiguous.out" 2> "$test_dir/ambiguous.stderr"
+test ! -s "$test_dir/ambiguous.out"
+cmp "$test_dir/ambiguous.expected-stderr" "$test_dir/ambiguous.stderr"
+touch -t 200001010000 "$test_dir/ambiguous.hsp"
+before=$(stat -c '%i:%Y' "$test_dir/ambiguous.hsp")
+"$formatter" --write "$test_dir/ambiguous.hsp" > "$test_dir/ambiguous.out" 2> "$test_dir/ambiguous.stderr"
+test ! -s "$test_dir/ambiguous.out"
+test "$(stat -c '%i:%Y' "$test_dir/ambiguous.hsp")" = "$before"
+cmp "$test_dir/ambiguous.expected-stderr" "$test_dir/ambiguous.stderr"
+"$formatter" - < "$test_dir/ambiguous.hsp" > "$test_dir/ambiguous.out" 2> "$test_dir/ambiguous.stderr"
+printf '<stdin>:1: warning: ambiguous label or multiplication; preserving whitespace\nfoo*bar\n' \
+    > "$test_dir/ambiguous.expected-stdin-stderr"
+cmp "$test_dir/ambiguous.hsp" "$test_dir/ambiguous.out"
+cmp "$test_dir/ambiguous.expected-stdin-stderr" "$test_dir/ambiguous.stderr"
+"$formatter" --roundtrip "$test_dir/ambiguous.hsp" > "$test_dir/ambiguous.out" 2> "$test_dir/ambiguous.stderr"
+cmp "$test_dir/ambiguous.hsp" "$test_dir/ambiguous.out"
+test ! -s "$test_dir/ambiguous.stderr"
+"$formatter" --compact-operators "$test_dir/ambiguous.hsp" > "$test_dir/ambiguous.out" 2> "$test_dir/ambiguous.stderr"
+cmp "$test_dir/ambiguous.hsp" "$test_dir/ambiguous.out"
+test ! -s "$test_dir/ambiguous.stderr"
+printf 'foo * bar\n' > "$test_dir/ambiguous-spaces.hsp"
+"$formatter" --compact-operators "$test_dir/ambiguous-spaces.hsp" > "$test_dir/ambiguous.out" 2> "$test_dir/ambiguous.stderr"
+cmp "$test_dir/ambiguous-spaces.hsp" "$test_dir/ambiguous.out"
+printf '%s:1: warning: ambiguous label or multiplication; preserving whitespace\nfoo * bar\n' \
+    "$test_dir/ambiguous-spaces.hsp" > "$test_dir/ambiguous.expected-stderr"
+cmp "$test_dir/ambiguous.expected-stderr" "$test_dir/ambiguous.stderr"
+
 modes='default compact short parens-add parens-remove comments-semicolon comments-c comments-block labels declarations operator-hsp operator-c increment-hsp increment-c operators-compact operators-hsp combined'
 for mode in $modes; do
     case "$mode" in
@@ -47,9 +81,9 @@ for mode in $modes; do
         operators-hsp) set -- --operator-style=hsp --increment-style=hsp ;;
         combined) set -- --indent-labels --comment-style=semicolon --block-comments=lines --condition-parens=add --repeat-parens=add --short-if --operator-style=c --increment-style=c --blank-lines-before-module=2 --blank-lines-before-deffunc=1 --blank-lines-before-defcfunc=1 ;;
     esac
-    "$formatter" "$@" "$repo/test/behavior.hsp" > "$test_dir/$mode.hsp"
-    "$formatter" "$@" --check "$test_dir/$mode.hsp"
-    "$formatter" "$@" "$test_dir/$mode.hsp" > "$test_dir/again.hsp"
+    "$formatter" "$@" "$repo/test/behavior.hsp" > "$test_dir/$mode.hsp" 2> "$test_dir/$mode.stderr"
+    "$formatter" "$@" --check "$test_dir/$mode.hsp" 2> "$test_dir/$mode.check-stderr"
+    "$formatter" "$@" "$test_dir/$mode.hsp" > "$test_dir/again.hsp" 2> "$test_dir/$mode.again-stderr"
     cmp "$test_dir/$mode.hsp" "$test_dir/again.hsp"
 done
 

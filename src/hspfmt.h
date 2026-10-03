@@ -21,6 +21,12 @@ struct Token {
     std::size_t end;
 };
 
+// An ambiguous label/multiplication gap was preserved instead of normalized.
+struct Diagnostic {
+    std::size_t line; // 1-based physical line in the input.
+    std::string source; // Original line without its newline.
+};
+
 struct Options {
     Encoding encoding = Encoding::Utf8;
     unsigned indent_width = 4;
@@ -44,6 +50,8 @@ struct Options {
 
 // Invalid/unterminated input throws std::runtime_error. No source is modified.
 std::vector<Token> lex(std::string_view source, Encoding encoding);
-std::string format(std::string_view source, const Options &options = {});
+// Diagnostics are appended when requested; the library does not write to stderr.
+std::string format(std::string_view source, const Options &options = {},
+                   std::vector<Diagnostic> *diagnostics = nullptr);
 
 } // namespace hspfmt

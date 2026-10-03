@@ -68,11 +68,40 @@ mes probe_hits@fmt_module
 mes 1||fmt_probe()
 mes probe_hits@fmt_module
 mes "operator text: && || != == ++ --"
+; Bare multiplication assignments share syntax with label-taking commands.
+probe_factor=2
+probe_factor*3
+mes probe_factor
+probe_factor * 2
+mes probe_factor
 /* standalone
  block comment */
 fmt_report
 mes fmt_increment(4)
 gosub *report
+on (0*2) gosub *report,*report
+probe_label = *report
+gosub probe_label
+ldim probe_labels,2
+probe_labels(0)=*report:probe_labels.1=*report
+gosub probe_labels(0)
+gosub probe_labels.1
+; User-defined commands/functions accept labels in multiple argument positions.
+fmt_call_labels *report,2*3,*report
+mes fmt_label_value(*report,fmt_label_value(*report,2*3,*report),*report)+1
+fmt_local_labels@fmt_module *report,2*3,*report
+mes fmt_local_label_value@fmt_module(*report,2*3)+1
+mes fmt_label_value(probe_label,2*3,probe_labels(0))
+; Compile event label references without registering handlers in HSPCL.
+if 0 {
+onclick gosub *report
+onclick gosub probe_label
+onkey goto *report
+onexit gosub *report
+onerror goto *report
+oncmd gosub *report,100+2
+button gosub "report",*report
+}
 mes "hspfmt integration ok"
 end
 
@@ -96,4 +125,25 @@ return p_value+1
 #defcfunc fmt_probe
 probe_hits++
 return 1
+
+#deffunc fmt_call_labels label p_first, int p_factor, label p_last
+gosub p_first
+mes p_factor
+gosub p_last
+return
+
+#defcfunc fmt_label_value label p_first, int p_factor, label p_last
+gosub p_first
+gosub p_last
+return p_factor
+
+#deffunc local fmt_local_labels label p_first, int p_factor, label p_last
+gosub p_first
+mes p_factor
+gosub p_last
+return
+
+#defcfunc local fmt_local_label_value label p_target, int p_factor
+gosub p_target
+return p_factor
 #global

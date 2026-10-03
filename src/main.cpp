@@ -180,7 +180,16 @@ int main(int argc, char **argv) {
         if (roundtrip) {
             for (const auto &token : hspfmt::lex(source, options.encoding))
                 output.append(source, token.begin, token.end - token.begin);
-        } else output = hspfmt::format(source, options);
+        } else {
+            std::vector<hspfmt::Diagnostic> diagnostics;
+            output = hspfmt::format(source, options, &diagnostics);
+            for (const auto &diagnostic : diagnostics) {
+                std::cerr << (filename.empty() || filename == "-" ? "<stdin>" : filename)
+                          << ':' << diagnostic.line
+                          << ": warning: ambiguous label or multiplication; preserving whitespace\n"
+                          << diagnostic.source << '\n';
+            }
+        }
         if (check) return output == source ? 0 : 1;
         if (write) {
             if (output != source) replace_file(filename, output);

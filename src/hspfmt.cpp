@@ -53,7 +53,7 @@ std::size_t character_end(std::string_view s, std::size_t i, Encoding encoding) 
 struct Item {
     Kind kind;
     std::string text;
-    bool gap;
+    std::string gap;
 };
 
 struct Frame {
@@ -423,13 +423,13 @@ std::vector<Item> expression_parens(const std::vector<Item> &items, const Option
                     if (mode == Parentheses::Remove)
                         while (wraps_expression(items, first, last)) { ++first; --last; }
                     const bool add = first < last && mode == Parentheses::Add && !wraps_expression(items, first, last);
-                    if (add) result.push_back({Kind::Symbol, "(", true});
+                    if (add) result.push_back({Kind::Symbol, "(", " "});
                     for (auto p = first; p < last; ++p) {
                         auto item = items[p];
-                        if (p == first) item.gap = !add;
+                        if (p == first) item.gap = add ? "" : " ";
                         result.push_back(std::move(item));
                     }
-                    if (add) result.push_back({Kind::Symbol, ")", false});
+                    if (add) result.push_back({Kind::Symbol, ")", ""});
                     if (t < end) result.push_back(items[t]);
                     start = t + 1;
                 }
@@ -443,8 +443,35 @@ std::vector<Item> expression_parens(const std::vector<Item> &items, const Option
     return result;
 }
 
-std::string print_items(const std::vector<Item> &items, const Options &options) {
+// At a bare statement head, name *value can be a command taking a label or
+// a variable's legacy multiplication assignment. Do not guess the name's role.
+std::vector<bool> ambiguous_label_gaps(const std::vector<Item> &items) {
+    std::vector<bool> gaps(items.size(), false);
+    for (std::size_t begin = 0; begin < items.size();) {
+        auto end = begin;
+        while (end < items.size() && !one_of(items[end].text, {":", "{", "}"})) ++end;
+        const auto start = next_code(items, begin, end);
+        if (start < end && !one_of(lower(items[start].text),
+                {"goto", "gosub", "onclick", "onkey", "onexit", "onerror", "oncmd", "button"})) {
+            auto pos = start + 1;
+            if (items[start].kind == Kind::Word && variable_end(items, start, end) != start) {
+                pos = next_code(items, pos, end);
+                while (pos + 1 < end && items[pos].text == "@" && items[pos + 1].kind == Kind::Word)
+                    pos = next_code(items, pos + 2, end);
+                if (pos + 1 < end && items[pos].text == "*" &&
+                    (items[pos + 1].kind == Kind::Word || items[pos + 1].text == "@"))
+                    gaps[pos] = gaps[pos + 1] = true;
+            }
+        }
+        begin = end == items.size() ? end : end + 1;
+    }
+    return gaps;
+}
+
+std::string print_items(const std::vector<Item> &items, const Options &options,
+                        bool *ambiguous_spacing = nullptr) {
     std::string out;
+    const auto preserved_gaps = ambiguous_label_gaps(items);
     bool previous_prefix = false;
     bool expect_operand = true;
     bool statement = true;
@@ -456,6 +483,10 @@ std::string print_items(const std::vector<Item> &items, const Options &options) 
         const std::string word = lower(text);
         const std::string prev = i ? items[i - 1].text : "";
         const std::string next = i + 1 < items.size() ? items[i + 1].text : "";
+        // goto/gosub also introduce label operands inside event and on commands.
+        const bool jump = parens == 0 && item.kind == Kind::Word && one_of(word, {"goto", "gosub"});
+        // A module-qualified command name continues across its @module suffix.
+        const bool command = statement || jump || (previous_command && (text == "@" || prev == "@"));
         const bool prefix = expect_operand && one_of(text, {"-", "+", "*"});
         const bool postfix = one_of(text, {"+", "-", "++", "--"}) && i > 0 &&
             (next.empty() || next == ":" || next == "}" || items[i + 1].kind == Kind::Comment);
@@ -466,7 +497,7 @@ std::string print_items(const std::vector<Item> &items, const Options &options) 
             else if (text == "," || text == ")" || text == "]") space = false;
             else if (prev == ",") space = true;
             else if (prev == "(" || prev == "[" || previous_prefix || postfix) space = false;
-            else if (text == "(" || text == "[") space = item.gap;
+            else if (text == "(" || text == "[") space = !item.gap.empty();
             else if (text == "." || prev == "." || text == "@" || prev == "@") space = false;
             else if (binary(word) || binary(lower(prev))) space = options.binary_spaces;
             // Do not merge word operators with operands when compact spacing is requested.
@@ -474,7 +505,7 @@ std::string print_items(const std::vector<Item> &items, const Options &options) 
                 (item.kind == Kind::Number && items[i - 1].kind == Kind::Word) ||
                 (item.kind == Kind::Word && items[i - 1].kind == Kind::Number)) space = true;
             // First command argument must remain separated, even for unary signs/labels.
-            if (previous_command && item.gap && text != "=" &&
+            if (previous_command && !item.gap.empty() && text != "=" &&
                 !postfix && !one_of(text, {"(", "[", ".", "@"})) space = true;
             // Compact spacing must not create ++, --, /*, //, <=, etc.
             if (!space && !prev.empty() && !text.empty() &&
@@ -488,9 +519,13 @@ std::string print_items(const std::vector<Item> &items, const Options &options) 
             if (text.substr(0, 2) == "0x") text.replace(0, 2, "$");
             else if (text.substr(0, 2) == "0b") text.replace(0, 2, "%");
         }
-        if (space) out += ' ';
+        if (preserved_gaps[i]) {
+            const std::string desired = options.binary_spaces ? " " : "";
+            if (ambiguous_spacing && item.gap != desired) *ambiguous_spacing = true;
+            out += item.gap;
+        } else if (space) out += ' ';
         out += text;
-        previous_command = statement && item.kind == Kind::Word;
+        previous_command = command && (item.kind == Kind::Word || text == "@");
         previous_prefix = prefix;
         if (text == "(" || text == "[") { ++parens; expect_operand = true; }
         else if (text == ")" || text == "]") { --parens; expect_operand = false; }
@@ -498,7 +533,7 @@ std::string print_items(const std::vector<Item> &items, const Options &options) 
         else if (text == "," || binary(word)) { expect_operand = true; statement = false; }
         else if (item.kind != Kind::Comment) {
             // At statement start a word can be a command; its first argument is an operand.
-            expect_operand = statement && item.kind == Kind::Word && parens == 0;
+            expect_operand = command && item.kind == Kind::Word && parens == 0;
             statement = false;
         }
     }
@@ -638,11 +673,22 @@ std::vector<Token> lex(std::string_view s, Encoding encoding) {
     return tokens;
 }
 
-std::string format(std::string_view source, const Options &options) {
+std::string format(std::string_view source, const Options &options,
+                   std::vector<Diagnostic> *diagnostics) {
     if (options.indent_width > 16) throw std::runtime_error("indent width must be between 0 and 16");
     for (const auto count : {options.blank_lines_before_module, options.blank_lines_before_deffunc,
                              options.blank_lines_before_defcfunc})
         if (count < -1 || count > 16) throw std::runtime_error("blank line count must be between 0 and 16, or -1 to preserve");
+    std::vector<std::string_view> original_lines;
+    if (diagnostics) {
+        for (std::size_t pos = 0; pos < source.size();) {
+            auto end = source.find_first_of("\r\n", pos);
+            if (end == std::string_view::npos) end = source.size();
+            original_lines.push_back(source.substr(pos, end - pos));
+            pos = end;
+            if (pos < source.size() && source[pos++] == '\r' && pos < source.size() && source[pos] == '\n') ++pos;
+        }
+    }
     std::string rewritten;
     if (options.comment_style != CommentStyle::Preserve || options.block_comments != BlockComments::Preserve) {
         rewritten = rewrite_comments(source, options);
@@ -656,7 +702,8 @@ std::string format(std::string_view source, const Options &options) {
     std::size_t begin = 0;
     bool protected_line = false;
     bool continuation = false;
-    bool gap = false;
+    std::string gap;
+    std::size_t line_number = 1;
     bool disabled = false;
     auto flush = [&](std::size_t end, std::string_view newline) {
         const std::string_view raw = source.substr(begin, end - begin);
@@ -719,7 +766,10 @@ std::string format(std::string_view source, const Options &options) {
             printed = operator_spelling(std::move(printed), options);
             if (!items.empty()) {
                 out.append(options.tabs ? depth : depth * options.indent_width, options.tabs ? '\t' : ' ');
-                out += print_items(printed, options);
+                bool ambiguous_spacing = false;
+                out += print_items(printed, options, &ambiguous_spacing);
+                if (ambiguous_spacing && diagnostics)
+                    diagnostics->push_back({line_number, std::string(original_lines.at(line_number - 1))});
             }
         }
         if (!opaque && label && options.indent_labels) state.label = 1;
@@ -729,19 +779,25 @@ std::string format(std::string_view source, const Options &options) {
         continuation = next_continuation;
         items.clear();
         protected_line = false;
-        gap = false;
+        gap.clear();
         begin = end + newline.size();
     };
     for (const auto &token : tokens) {
         const auto text = source.substr(token.begin, token.end - token.begin);
         if (token.kind == Kind::Bom) { out.append(text); begin = token.end; }
         else if (token.kind == Kind::Newline) flush(token.begin, text);
-        else if (token.kind == Kind::Space) gap = true;
+        else if (token.kind == Kind::Space) gap.append(text);
         else {
             // Multiline tokens are copied together with their entire surrounding line.
             if (text.find_first_of("\r\n") != std::string_view::npos) protected_line = true;
             items.push_back({token.kind, std::string(text), gap});
-            gap = false;
+            gap.clear();
+        }
+        for (std::size_t i = 0; i < text.size(); ++i) {
+            if (text[i] == '\r') {
+                ++line_number;
+                if (i + 1 < text.size() && text[i + 1] == '\n') ++i;
+            } else if (text[i] == '\n') ++line_number;
         }
     }
     if (begin < source.size()) flush(source.size(), "");

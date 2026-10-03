@@ -20,12 +20,40 @@ void rejects(const std::string &input, hspfmt::Options options = {}) {
     try { hspfmt::format(input, options); } catch (const std::runtime_error &) { return; }
     throw std::runtime_error("expected rejection: " + input);
 }
+void diagnostic_cases(const std::string &input, const std::string &expected,
+                      const std::vector<hspfmt::Diagnostic> &warnings, hspfmt::Options options = {}) {
+    expect(input, expected, options);
+    std::vector<hspfmt::Diagnostic> actual;
+    if (hspfmt::format(input, options, &actual) != expected || actual.size() != warnings.size())
+        throw std::runtime_error("unexpected ambiguity diagnostics: " + input);
+    for (std::size_t i = 0; i < actual.size(); ++i)
+        if (actual[i].line != warnings[i].line || actual[i].source != warnings[i].source)
+            throw std::runtime_error("wrong ambiguity source location: " + input);
+}
 }
 
 int main() {
     try {
         expect("", "");
         expect("a=1:b=2\n", "a = 1 : b = 2\n");
+        diagnostic_cases("foo *bar\n", "foo *bar\n", {{1, "foo *bar"}});
+        diagnostic_cases("foo*bar\n", "foo*bar\n", {{1, "foo*bar"}});
+        diagnostic_cases("foo * bar\n", "foo * bar\n", {});
+        diagnostic_cases("foo\t*\tbar\n", "foo\t*\tbar\n", {{1, "foo\t*\tbar"}});
+        diagnostic_cases("foo@mod*bar,2*3\n", "foo@mod*bar, 2 * 3\n", {{1, "foo@mod*bar,2*3"}});
+        diagnostic_cases("foo /* head */ *bar\n", "foo /* head */ *bar\n", {{1, "foo /* head */ *bar"}});
+        diagnostic_cases("if flag:foo *bar:baz*qux\n", "if flag : foo *bar : baz*qux\n",
+                         {{1, "if flag:foo *bar:baz*qux"}});
+        diagnostic_cases("a=*lb\na=x*y\nx=f(*lb,2*3)\na(0)*b\na.0*b\n",
+                         "a = *lb\na = x * y\nx = f(*lb, 2 * 3)\na(0) * b\na.0 * b\n", {});
+        diagnostic_cases("goto *lb\ngosub *lb\nonclick gosub *lb\non n goto *lb\n",
+                         "goto *lb\ngosub *lb\nonclick gosub *lb\non n goto *lb\n", {});
+        diagnostic_cases("/* first\nsecond */\r\nfoo*bar\r\n", "/* first\nsecond */\r\nfoo*bar\r\n",
+                         {{3, "foo*bar"}});
+        diagnostic_cases("mes {\"\nmultiline\n\"}\nfoo*bar", "mes {\"\nmultiline\n\"}\nfoo*bar",
+                         {{4, "foo*bar"}});
+        diagnostic_cases("; hspfmt: off\nfoo*bar\n; hspfmt: on\nfoo*bar\n",
+                         "; hspfmt: off\nfoo*bar\n; hspfmt: on\nfoo*bar\n", {{4, "foo*bar"}});
         expect("if flag:foo=bar:baz=1\n", "if flag : foo = bar : baz = 1\n");
         expect("while x<10\nx+=1\nwend\n", "while x < 10\n    x += 1\nwend\n");
         expect("repeat 2\nwhile flag\nmes a\nwend\nloop\n", "repeat 2\n    while flag\n        mes a\n    wend\nloop\n");
@@ -35,6 +63,43 @@ int main() {
         expect("if flag {\na=1\n} else {\na=2\n}\n", "if flag {\n    a = 1\n} else {\n    a = 2\n}\n");
         expect("#deffunc foo int p\nx=1\nreturn\n#global\nx=2\n", "#deffunc foo int p\n    x = 1\n    return\n#global\nx = 2\n");
         expect("*main\ngoto *main\na=a*2+-1\n", "*main\ngoto *main\na = a * 2 + -1\n");
+        expect("onclick gosub *queue_mouse_click\nonkey goto *key\nonexit gosub *exit\n"
+               "onerror goto *error\noncmd gosub *message,100+2\n",
+               "onclick gosub *queue_mouse_click\nonkey goto *key\nonexit gosub *exit\n"
+               "onerror goto *error\noncmd gosub *message, 100 + 2\n");
+        expect("on (n*2) GOSUB *first,*second\nif flag:onclick goto *click\n"
+               "onclick *click\nbutton gosub \"go\",*click\na=b*c\n",
+               "on (n * 2) GOSUB *first, *second\nif flag : onclick goto *click\n"
+               "onclick *click\nbutton gosub \"go\", *click\na = b * c\n");
+        for (const auto style : {hspfmt::OperatorStyle::Preserve, hspfmt::OperatorStyle::Hsp,
+                                 hspfmt::OperatorStyle::C}) {
+            for (const bool compact : {false, true}) {
+                hspfmt::Options label_options;
+                label_options.operator_style = style;
+                label_options.binary_spaces = !compact;
+                expect("a = *lb1\nlabels(0)=*lb1:labels.1=*lb2\na@mod=*lb1@mod\n"
+                       "gosub a\nonclick gosub labels(0)\nproduct=x*y\n",
+                       compact ? "a=*lb1\nlabels(0)=*lb1 : labels.1=*lb2\na@mod=*lb1@mod\n"
+                                 "gosub a\nonclick gosub labels(0)\nproduct=x*y\n"
+                               : "a = *lb1\nlabels(0) = *lb1 : labels.1 = *lb2\na@mod = *lb1@mod\n"
+                                 "gosub a\nonclick gosub labels(0)\nproduct = x * y\n",
+                       label_options);
+                expect("custom *lb1,2*3,*lb2\ncustom 2*3,*lb1\n"
+                       "x=custom_value(*lb1,custom_value(*lb2,2*3,*lb1),*lb2)+1\n",
+                       compact ? "custom *lb1, 2*3, *lb2\ncustom 2*3, *lb1\n"
+                                 "x=custom_value(*lb1, custom_value(*lb2, 2*3, *lb1), *lb2)+1\n"
+                               : "custom *lb1, 2 * 3, *lb2\ncustom 2 * 3, *lb1\n"
+                                 "x = custom_value(*lb1, custom_value(*lb2, 2 * 3, *lb1), *lb2) + 1\n",
+                       label_options);
+                expect("custom@mod *lb1,2*3,*lb2\nx=custom_value@mod(*lb1,2*3,*lb2)\n"
+                       "product=x@mod*y@mod\n",
+                       compact ? "custom@mod *lb1, 2*3, *lb2\nx=custom_value@mod(*lb1, 2*3, *lb2)\n"
+                                 "product=x@mod*y@mod\n"
+                               : "custom@mod *lb1, 2 * 3, *lb2\nx = custom_value@mod(*lb1, 2 * 3, *lb2)\n"
+                                 "product = x@mod * y@mod\n",
+                       label_options);
+            }
+        }
         expect("mes \"; { : } //\" ; comment  stays\n", "mes \"; { : } //\" ; comment  stays\n");
         expect("s={\"\n  : while \\\"}\n\"}\nx=1\n", "s={\"\n  : while \\\"}\n\"}\nx = 1\n");
         expect("/* block\n while {\n*/\nx=1\n", "/* block\n while {\n*/\nx = 1\n");
@@ -69,10 +134,20 @@ int main() {
         expect("repeat\na=1\nloop\n", "repeat\n\ta = 1\nloop\n", options);
         options = {};
         options.binary_spaces = false;
+        diagnostic_cases("foo*bar\n", "foo*bar\n", {}, options);
+        diagnostic_cases("foo *bar\n", "foo *bar\n", {{1, "foo *bar"}}, options);
+        diagnostic_cases("foo * bar\n", "foo * bar\n", {{1, "foo * bar"}}, options);
+        diagnostic_cases("foo\t*\tbar\rfoo@mod *bar", "foo\t*\tbar\rfoo@mod *bar",
+                         {{1, "foo\t*\tbar"}, {2, "foo@mod *bar"}}, options);
+        expect("onclick gosub *click\non n+1 goto *first,*second\na=b*c\n",
+               "onclick gosub *click\non n+1 goto *first, *second\na=b*c\n", options);
         expect("a = b + 1\nif a = 1 : mes -1\n", "a=b+1\nif a=1 : mes -1\n", options);
         expect("x = a - -1\nx = a + +1\nif (a) and (b) : x=1\n", "x=a- -1\nx=a+ +1\nif (a) and (b) : x=1\n", options);
         options = {};
         options.encoding = hspfmt::Encoding::Cp932;
+        diagnostic_cases("\xef\xbb\xbf" "foo*bar\r\nfoo *\x95\x5c\r\n",
+                         "\xef\xbb\xbf" "foo*bar\r\nfoo *\x95\x5c\r\n",
+                         {{1, "\xef\xbb\xbf" "foo*bar"}, {2, "foo *\x95\x5c"}}, options);
         expect("mes \"\x95\x5c\"\r\na=1\r\n", "mes \"\x95\x5c\"\r\na = 1\r\n", options);
         options = {};
         options.indent_labels = true;
@@ -86,6 +161,8 @@ int main() {
         expect("*main\nrepeat\nx=1\nloop\n", "*main\n\trepeat\n\t\tx = 1\n\tloop\n", options);
         options = {};
         options.comment_style = hspfmt::CommentStyle::Semicolon;
+        diagnostic_cases("// head\nfoo*bar // tail\n", "; head\nfoo*bar ; tail\n",
+                         {{2, "foo*bar // tail"}}, options);
         expect("// hello\nx=1 // tail\nmes \"// stays\"\n", "; hello\nx = 1 ; tail\nmes \"// stays\"\n", options);
         expect("#define f x // stays\nx = 1 + \\\n  2 // stays\n", "#define f x // stays\nx = 1 + \\\n  2 // stays\n", options);
         expect("// hspfmt: off\nx=1\n", "// hspfmt: off\nx = 1\n", options);
@@ -93,6 +170,8 @@ int main() {
         expect("; hello\nx=1 ; tail\n; hspfmt: off\nx=2 ; kept\n; hspfmt: on\nx=3\n",
                "// hello\nx = 1 // tail\n; hspfmt: off\nx=2 ; kept\n; hspfmt: on\nx = 3\n", options);
         options.block_comments = hspfmt::BlockComments::Lines;
+        diagnostic_cases("/* head\n tail */\nfoo*bar // tail\n", "// head\n// tail \nfoo*bar // tail\n",
+                         {{3, "foo*bar // tail"}}, options);
         expect("/* hello\n world\n*/\nx=1\n", "// hello\n// world\n//\nx = 1\n", options);
         expect("x=1 /* inline */ : x=2\n", "x = 1 /* inline */ : x = 2\n", options);
         expect("/* head */ x=1\n", "/* head */ x = 1\n", options);
@@ -134,6 +213,8 @@ int main() {
         options.blank_lines_before_module = 2;
         options.blank_lines_before_deffunc = 1;
         options.blank_lines_before_defcfunc = 0;
+        diagnostic_cases("x=1\n#module m\nfoo*bar\n#global\n",
+                         "x = 1\n\n\n#module m\nfoo*bar\n#global\n", {{3, "foo*bar"}}, options);
         expect("\n\n; module docs\n#module m\n\n\n; function docs\n#deffunc f\nx=1\n\n#defcfunc g\nreturn 1\n#global\n#module n\n",
                "; module docs\n#module m\n\n; function docs\n#deffunc f\n    x = 1\n#defcfunc g\n    return 1\n#global\n\n\n#module n\n", options);
         expect("\xef\xbb\xbf" "\r\n\r\n#module m\r\nx=1\r\n#deffunc f",
