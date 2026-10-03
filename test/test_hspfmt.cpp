@@ -113,6 +113,8 @@ int main() {
         expect("if flag { /* comment\n still comment */\nx=1\n}\n", "if flag { /* comment\n still comment */\n    x = 1\n}\n");
         expect("mes \"; hspfmt: off\"\na=1\n", "mes \"; hspfmt: off\"\na = 1\n");
         expect("a=1.0e-10:b=$ffff_0000L\n", "a = 1.0e-10 : b = $ffff_0000L\n");
+        expect("a=1d:b=2D:c=1.25d:d=2.5D\n", "a = 1d : b = 2D : c = 1.25d : d = 2.5D\n");
+        expect("a=%_0010:b=%__10_01:c=%_1010L\n", "a = %_0010 : b = %__10_01 : c = %_1010L\n");
         expect("mes a(0),,b@mod\n", "mes a(0),, b@mod\n");
         expect("a = 1 + \\\n  2\n", "a = 1 + \\\n  2\n");
         expect("; hspfmt: off\ncustom_start\nx=1\ncustom_end\n; hspfmt: on\na=2\n",
@@ -120,6 +122,7 @@ int main() {
         hspfmt::Options options;
         options.hsp_numeric_prefixes = true;
         expect("a=0x00Ff:b=0b0010:s=\"0xff\"\n", "a = $00Ff : b = %0010 : s = \"0xff\"\n", options);
+        expect("a=0b_0010:b=0b__10_01\n", "a = %_0010 : b = %__10_01\n", options);
         options = {};
         options.short_if = true;
         expect("if (flag) { foo=bar:baz=1 }\n", "if flag : foo = bar : baz = 1\n", options);
@@ -127,6 +130,14 @@ int main() {
         expect("if a { if b { x=1 } }\n", "if a { if b { x = 1 } }\n", options);
         expect("if a { mes 1 }\n", "if a { mes 1 }\n", options);
         expect("if a { x=1 } ; note\n", "if a { x = 1 } ; note\n", options);
+        expect("if a { x=1 }\nelse { x=2 }\n", "if a { x = 1 }\nelse { x = 2 }\n", options);
+        expect("if a { x=1 }\r\n  ELSE { x=2 }",
+               "if a { x = 1 }\r\nELSE { x = 2 }", options);
+        expect("if a { x=1 }\n/* note */ else { x=2 }\n",
+               "if a { x = 1 }\n/* note */ else { x = 2 }\n", options);
+        expect("if a {\nif b { x=1 }\nelse { x=2 }\n}\n",
+               "if a {\n    if b { x = 1 }\n    else { x = 2 }\n}\n", options);
+        expect("if a { x=1 }\n; note\ny=2\n", "if a : x = 1\n; note\ny = 2\n", options);
         options.line_width = 10;
         expect("if (flag) { x=1 }\n", "if (flag) { x = 1 }\n", options);
         options = {};
@@ -134,6 +145,7 @@ int main() {
         expect("repeat\na=1\nloop\n", "repeat\n\ta = 1\nloop\n", options);
         options = {};
         options.binary_spaces = false;
+        expect("a=1d:b=2D:c=%_0010\n", "a=1d : b=2D : c=%_0010\n", options);
         diagnostic_cases("foo*bar\n", "foo*bar\n", {}, options);
         diagnostic_cases("foo *bar\n", "foo *bar\n", {{1, "foo *bar"}}, options);
         diagnostic_cases("foo * bar\n", "foo * bar\n", {{1, "foo * bar"}}, options);

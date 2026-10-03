@@ -196,6 +196,7 @@ int main(int argc, char **argv) {
             return 0;
         }
         std::cout.write(output.data(), static_cast<std::streamsize>(output.size()));
+        std::cout.flush();
         if (!std::cout) throw std::runtime_error("output write failed");
         return 0;
     } catch (const std::exception &error) {

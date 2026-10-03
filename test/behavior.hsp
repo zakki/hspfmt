@@ -5,6 +5,9 @@ flag=cnt
 foo=0:baz=0
 if (flag) { foo=7:baz=1 }
 mes str(foo)+","+str(baz)
+if flag { foo=5 }
+else { foo=6 }
+mes foo
 if flag { foo=9 } : baz=3
 mes str(foo)+","+str(baz)
 if flag : foo=2:baz=4
@@ -30,6 +33,15 @@ swend
 mes $00ff+%0010
 mes 0x00ff+0b0010
 mes 1.0e-2
+mes 1d
+mes 2D
+mes 1.25d
+mes 2.5D
+mes %_0010
+mes %__10_01
+mes %_1010L
+mes 0b_0010
+mes 0b__10_01
 repeat 2,1
 mes cnt
 loop

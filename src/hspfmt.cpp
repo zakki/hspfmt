@@ -643,7 +643,8 @@ std::vector<Token> lex(std::string_view s, Encoding encoding) {
                 }
             }
             if (!closed) throw std::runtime_error("unterminated string");
-        } else if (digit(s[i]) || s[i] == '$' || (s[i] == '%' && i + 1 < s.size() && digit(s[i + 1]))) {
+        } else if (digit(s[i]) || s[i] == '$' || (s[i] == '%' && i + 1 < s.size() &&
+                   (digit(s[i + 1]) || s[i + 1] == '_'))) {
             kind = Kind::Number;
             const bool hex = s[i] == '$' || s.substr(i, 2) == "0x";
             const bool bin = s[i] == '%' || s.substr(i, 2) == "0b";
@@ -657,7 +658,8 @@ std::vector<Token> lex(std::string_view s, Encoding encoding) {
                     if (i < s.size() && (s[i] == '+' || s[i] == '-')) ++i;
                 } else break;
             }
-            if (i < s.size() && (s[i] == 'l' || s[i] == 'L' || s[i] == 'f' || s[i] == 'F')) ++i;
+            if (i < s.size() && (s[i] == 'l' || s[i] == 'L' || s[i] == 'f' || s[i] == 'F' ||
+                                (!hex && !bin && (s[i] == 'd' || s[i] == 'D')))) ++i;
         } else if (alpha(s[i]) || static_cast<unsigned char>(s[i]) >= 128) {
             kind = Kind::Word;
             do { i = character_end(s, i, encoding); }
@@ -695,6 +697,17 @@ std::string format(std::string_view source, const Options &options,
         source = rewritten;
     }
     const auto tokens = lex(source, options.encoding);
+    // An else on the following line must keep its matching if in brace form.
+    const auto followed_by_else = [&](std::size_t next) {
+        for (; next < tokens.size(); ++next) {
+            const auto &token = tokens[next];
+            if (token.kind == Kind::Space || token.kind == Kind::Newline ||
+                token.kind == Kind::Comment || token.kind == Kind::Bom) continue;
+            return token.kind == Kind::Word &&
+                lower(source.substr(token.begin, token.end - token.begin)) == "else";
+        }
+        return false;
+    };
     State state;
     std::vector<Conditional> conditionals;
     std::vector<Item> items;
@@ -705,7 +718,7 @@ std::string format(std::string_view source, const Options &options,
     std::string gap;
     std::size_t line_number = 1;
     bool disabled = false;
-    auto flush = [&](std::size_t end, std::string_view newline) {
+    auto flush = [&](std::size_t end, std::string_view newline, std::size_t next_token) {
         const std::string_view raw = source.substr(begin, end - begin);
         bool preserve = protected_line || continuation || disabled;
         const bool next_continuation = !items.empty() && items.back().text == "\\";
@@ -761,7 +774,9 @@ std::string format(std::string_view source, const Options &options,
                     line_state.blocks.back().case_body = false;
             }
             const unsigned depth = label ? 0 : line_state.depth();
-            auto printed = short_if(items, options, depth);
+            const bool following_else = options.short_if && !items.empty() &&
+                lower(items[0].text) == "if" && followed_by_else(next_token);
+            auto printed = following_else ? items : short_if(items, options, depth);
             printed = expression_parens(printed, options);
             printed = operator_spelling(std::move(printed), options);
             if (!items.empty()) {
@@ -782,10 +797,11 @@ std::string format(std::string_view source, const Options &options,
         gap.clear();
         begin = end + newline.size();
     };
-    for (const auto &token : tokens) {
+    for (std::size_t token_index = 0; token_index < tokens.size(); ++token_index) {
+        const auto &token = tokens[token_index];
         const auto text = source.substr(token.begin, token.end - token.begin);
         if (token.kind == Kind::Bom) { out.append(text); begin = token.end; }
-        else if (token.kind == Kind::Newline) flush(token.begin, text);
+        else if (token.kind == Kind::Newline) flush(token.begin, text, token_index + 1);
         else if (token.kind == Kind::Space) gap.append(text);
         else {
             // Multiline tokens are copied together with their entire surrounding line.
@@ -800,7 +816,7 @@ std::string format(std::string_view source, const Options &options,
             } else if (text[i] == '\n') ++line_number;
         }
     }
-    if (begin < source.size()) flush(source.size(), "");
+    if (begin < source.size()) flush(source.size(), "", tokens.size());
     if (!conditionals.empty()) throw std::runtime_error("unterminated preprocessor conditional");
     if (!state.blocks.empty()) throw std::runtime_error("unterminated block, expected " + state.blocks.back().close);
     return declaration_spacing(out, options);
