@@ -72,7 +72,7 @@ int main() {
                    "x = " + sum + "(" + kanji + ", " + hiragana + ")\n", japanese);
             japanese.operator_style = hspfmt::OperatorStyle::C;
             japanese.increment_style = hspfmt::OperatorStyle::C;
-            japanese.binary_spaces = false;
+            japanese.operator_spacing = hspfmt::Spacing::Compact;
             expect("if " + kanji + "=" + hiragana + " : " + table + "+\n",
                    "if " + kanji + "==" + hiragana + " : " + table + "++\n", japanese);
             hspfmt::Options normalized;
@@ -149,7 +149,7 @@ int main() {
             for (const bool compact : {false, true}) {
                 hspfmt::Options label_options;
                 label_options.operator_style = style;
-                label_options.binary_spaces = !compact;
+                label_options.operator_spacing = compact ? hspfmt::Spacing::Compact : hspfmt::Spacing::Space;
                 expect("a = *lb1\nlabels(0)=*lb1:labels.1=*lb2\na@mod=*lb1@mod\n"
                        "gosub a\nonclick gosub labels(0)\nproduct=x*y\n",
                        compact ? "a=*lb1\nlabels(0)=*lb1 : labels.1=*lb2\na@mod=*lb1@mod\n"
@@ -216,8 +216,93 @@ int main() {
         options = {};
         options.tabs = true;
         expect("repeat\na=1\nloop\n", "repeat\n\ta = 1\nloop\n", options);
+        options.base_indent = 1;
+        expect("x=1\n*main\nrepeat\nx=2\nloop\n#module m\n#deffunc f\nx=3\n#global\nx=4\n",
+               "\tx = 1\n*main\n\trepeat\n\t\tx = 2\n\tloop\n#module m\n#deffunc f\n\tx = 3\n#global\n\tx = 4\n", options);
+        options.loop_indent = 0;
+        expect("repeat 2\nx=1\nif flag {\nx=2\n}\nloop\n",
+               "\trepeat 2\n\tx = 1\n\tif flag {\n\t\tx = 2\n\t}\n\tloop\n", options);
+        expect("while n\nfor i,0,3\ndo\nforeach a\nx=1\nloop\nuntil flag\nnext\nwend\n",
+               "\twhile n\n\tfor i, 0, 3\n\tdo\n\tforeach a\n\tx = 1\n\tloop\n\tuntil flag\n\tnext\n\twend\n", options);
+        expect("switch x\ncase 1\nrepeat 2\nx=1\nloop\nswbreak\ndefault\nx=2\nswend\n",
+               "\tswitch x\n\t\tcase 1\n\t\t\trepeat 2\n\t\t\tx = 1\n\t\t\tloop\n\t\t\tswbreak\n\t\tdefault\n\t\t\tx = 2\n\tswend\n", options);
+        expect("#if A\nrepeat 2\n#else\nrepeat 3\n#endif\nx=1\nloop\n",
+               "#if A\n\trepeat 2\n#else\n\trepeat 3\n#endif\n\tx = 1\n\tloop\n", options);
+        rejects("repeat\n", options);
+        rejects("loop\n", options);
         options = {};
-        options.binary_spaces = false;
+        options.indent_width = 2;
+        options.base_indent = 2;
+        options.loop_indent = 2;
+        expect("x=1\nrepeat\nx=2\nloop\n", "    x = 1\n    repeat\n        x = 2\n    loop\n", options);
+        options.preserve_indent = true;
+        expect("\tx=1\n repeat\nx=2\n loop\n", "\tx = 1\n repeat\nx = 2\n loop\n", options);
+        options = {};
+        options.base_indent = 16;
+        expect("x=1\n", std::string(64, ' ') + "x = 1\n", options);
+        options.base_indent = 17;
+        rejects("x=1\n", options);
+        options = {};
+        options.loop_indent = 16;
+        expect("repeat\nx=1\nloop\n", "repeat\n" + std::string(64, ' ') + "x = 1\nloop\n", options);
+        options.loop_indent = 17;
+        rejects("x=1\n", options);
+        options = {};
+        options.tabs = true;
+        options.preserve_indent = true;
+        options.indent_labels = true;
+        expect("\t*main\n\trepeat 2\n \t a=1\n\tloop\n\t\t; aligned\n",
+               "\t*main\n\trepeat 2\n \t a = 1\n\tloop\n\t\t; aligned\n", options);
+        expect("#module m\n#deffunc f\n\t  x=1\n#global\n  x=2\n",
+               "#module m\n#deffunc f\n\t  x = 1\n#global\n  x = 2\n", options);
+        expect("\xef\xbb\xbf\t x=1\r\n\tmes x", "\xef\xbb\xbf\t x = 1\r\n\tmes x", options);
+        rejects("\trepeat\n", options);
+        options.short_if = true;
+        options.line_width = 18;
+        expect("\t  if flag { x=1 }\n", "\t  if flag : x = 1\n", options);
+        options.line_width = 17;
+        expect("\t  if flag { x=1 }\n", "\t  if flag { x = 1 }\n", options);
+        options = {};
+        options.operator_spacing = hspfmt::Spacing::Preserve;
+        expect("a=1\nb = 2+3 * 4\nc\t=\t5 +6\nx=a - -1\n",
+               "a=1\nb = 2+3 * 4\nc\t=\t5 +6\nx=a - -1\n", options);
+        diagnostic_cases("foo*bar\nfoo\t* bar\n", "foo*bar\nfoo\t* bar\n", {}, options);
+        options.operator_style = hspfmt::OperatorStyle::C;
+        expect("x=a=b & c!d\n", "x=a==b && c!=d\n", options);
+        options = {};
+        options.comma_spacing = hspfmt::Spacing::Preserve;
+        expect("mes 1,, 3 ,4\nx=f(1,\t2 ,3)\n",
+               "mes 1,, 3 ,4\nx = f(1,\t2 ,3)\n", options);
+        options.comma_spacing = hspfmt::Spacing::Compact;
+        expect("mes -1, -2, *label\nx=f(1 , 2)\n", "mes -1,-2,*label\nx = f(1,2)\n", options);
+        options = {};
+        options.colon_spacing = hspfmt::Spacing::Preserve;
+        expect("a=1:b=2 :c=3\nmes 1\t:\tmes 2\n",
+               "a = 1:b = 2 :c = 3\nmes 1\t:\tmes 2\n", options);
+        options.colon_spacing = hspfmt::Spacing::Compact;
+        expect("redraw : boxf\na=1 : b=2\n", "redraw:boxf\na = 1:b = 2\n", options);
+        options = {};
+        options.comment_spacing = hspfmt::Spacing::Preserve;
+        expect("a=1\t\t; aligned\nmes 1// adjacent\nx=2 /* block */\n",
+               "a = 1\t\t; aligned\nmes 1// adjacent\nx = 2 /* block */\n", options);
+        options.comment_style = hspfmt::CommentStyle::C;
+        expect("a=1\t\t; aligned\n", "a = 1\t\t// aligned\n", options);
+        options.comment_spacing = hspfmt::Spacing::Compact;
+        expect("mes 1 ; tail\nx=a/ /* block */b\n",
+               "mes 1// tail\nx = a / /* block */ b\n", options);
+        options = {};
+        options.preserve_indent = true;
+        options.operator_spacing = hspfmt::Spacing::Preserve;
+        options.comma_spacing = hspfmt::Spacing::Preserve;
+        options.colon_spacing = hspfmt::Spacing::Preserve;
+        options.comment_spacing = hspfmt::Spacing::Preserve;
+        expect("\tt1=\"\":t2=\"\"\n\tmesbox t1,160,32,0\t\t; aligned\n\t\t\t; continuation\n*tmprt\n\tobjprm 0,t1\t\t; aligned\n",
+               "\tt1=\"\":t2=\"\"\n\tmesbox t1,160,32,0\t\t; aligned\n\t\t\t; continuation\n*tmprt\n\tobjprm 0,t1\t\t; aligned\n", options);
+        options.encoding = hspfmt::Encoding::Cp932;
+        expect("\t\x95\x5c=1:mes \x95\x5c\t; \x95\x5c\r\n",
+               "\t\x95\x5c=1:mes \x95\x5c\t; \x95\x5c\r\n", options);
+        options = {};
+        options.operator_spacing = hspfmt::Spacing::Compact;
         expect("a=1d:b=2D:c=%_0010\n", "a=1d : b=2D : c=%_0010\n", options);
         diagnostic_cases("foo*bar\n", "foo*bar\n", {}, options);
         diagnostic_cases("foo *bar\n", "foo *bar\n", {{1, "foo *bar"}}, options);
@@ -332,7 +417,7 @@ int main() {
         expect("; hspfmt: off\na=b=c\n; hspfmt: on\nx=1 + \\\n a=b\n",
                "; hspfmt: off\na=b=c\n; hspfmt: on\nx=1 + \\\n a=b\n", options);
         expect("mes !a\nx=a!\n", "mes ! a\nx = a !\n", options);
-        options.binary_spaces = false;
+        options.operator_spacing = hspfmt::Spacing::Compact;
         expect("x=a=b & c! -d\n", "x=a==b&&c!=-d\n", options);
         options = {};
         options.operator_style = hspfmt::OperatorStyle::Hsp;
@@ -340,7 +425,7 @@ int main() {
                "a = b\nx = a = b\nif a = b & a ! c | b = c : x = 1\n", options);
         expect("x==b\na(0)==b==c\n", "x == b\na(0) == b = c\n", options);
         expect("x=a<=b && a>=b\na+=1\n", "x = a <= b & a >= b\na += 1\n", options);
-        options.binary_spaces = false;
+        options.operator_spacing = hspfmt::Spacing::Compact;
         expect("x = a == b && c != -d\n", "x=a=b&c!-d\n", options);
         options = {};
         options.increment_style = hspfmt::OperatorStyle::C;

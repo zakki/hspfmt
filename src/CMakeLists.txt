@@ -21,6 +21,9 @@ if(BUILD_TESTING)
     add_test(NAME hspfmt_cli_errors COMMAND ${CMAKE_COMMAND}
         "-DFORMATTER=$<TARGET_FILE:hspfmt>"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/../test/cli_errors.cmake")
+    add_test(NAME hspfmt_cli_spacing COMMAND ${CMAKE_COMMAND}
+        "-DFORMATTER=$<TARGET_FILE:hspfmt>"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/../test/cli_spacing.cmake")
     if(UNIX AND EXISTS "/dev/full")
         add_test(NAME hspfmt_output_failure COMMAND ${CMAKE_COMMAND}
             "-DFORMATTER=$<TARGET_FILE:hspfmt>"

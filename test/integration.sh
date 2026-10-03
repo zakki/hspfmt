@@ -60,11 +60,15 @@ printf '%s:1: warning: ambiguous label or multiplication; preserving whitespace\
     "$test_dir/ambiguous-spaces.hsp" > "$test_dir/ambiguous.expected-stderr"
 cmp "$test_dir/ambiguous.expected-stderr" "$test_dir/ambiguous.stderr"
 
-modes='default compact short parens-add parens-remove comments-semicolon comments-c comments-block labels declarations operator-hsp operator-c increment-hsp increment-c operators-compact operators-hsp combined'
+modes='default compact sample-config compact-config structured-config spacing-compact short parens-add parens-remove comments-semicolon comments-c comments-block labels declarations operator-hsp operator-c increment-hsp increment-c operators-compact operators-hsp combined'
 for mode in $modes; do
     case "$mode" in
         default) set -- ;;
         compact) set -- --compact-operators ;;
+        sample-config) set -- "--config=$repo/.hspfmt.example" ;;
+        compact-config) set -- "--config=$repo/presets/compact.hspfmt" ;;
+        structured-config) set -- "--config=$repo/presets/structured.hspfmt" ;;
+        spacing-compact) set -- --operator-spacing=compact --comma-spacing=compact --colon-spacing=compact --comment-spacing=compact ;;
         short) set -- --short-if --hsp-prefixes ;;
         parens-add) set -- --condition-parens=add --repeat-parens=add ;;
         parens-remove) set -- --condition-parens=remove --repeat-parens=remove ;;
@@ -92,16 +96,19 @@ for encoding in utf8 cp932; do
     "$formatter" --no-config "--encoding=$encoding" --roundtrip "$repo/test/japanese-$encoding.hsp" \
         > "$test_dir/japanese-$encoding-roundtrip.hsp"
     cmp "$repo/test/japanese-$encoding.hsp" "$test_dir/japanese-$encoding-roundtrip.hsp"
-    for mode in default compact operators labels; do
+    for mode in default compact operators labels sample-config compact-config structured-config; do
         case "$mode" in
-            default) set -- ;;
-            compact) set -- --compact-operators ;;
-            operators) set -- --operator-style=c --increment-style=c ;;
-            labels) set -- --indent-labels ;;
+            default) set -- --no-config ;;
+            compact) set -- --no-config --compact-operators ;;
+            sample-config) set -- "--config=$repo/.hspfmt.example" ;;
+            compact-config) set -- "--config=$repo/presets/compact.hspfmt" ;;
+            structured-config) set -- "--config=$repo/presets/structured.hspfmt" ;;
+            operators) set -- --no-config --operator-style=c --increment-style=c ;;
+            labels) set -- --no-config --indent-labels ;;
         esac
-        "$formatter" --no-config "--encoding=$encoding" "$@" "$repo/test/japanese-$encoding.hsp" \
+        "$formatter" "--encoding=$encoding" "$@" "$repo/test/japanese-$encoding.hsp" \
             > "$test_dir/japanese-$encoding-$mode.hsp" 2> "$test_dir/japanese-$encoding-$mode.stderr"
-        "$formatter" --no-config "--encoding=$encoding" "$@" "$test_dir/japanese-$encoding-$mode.hsp" \
+        "$formatter" "--encoding=$encoding" "$@" "$test_dir/japanese-$encoding-$mode.hsp" \
             > "$test_dir/japanese-again.hsp" 2> "$test_dir/japanese-again.stderr"
         cmp "$test_dir/japanese-$encoding-$mode.hsp" "$test_dir/japanese-again.hsp"
     done
@@ -215,7 +222,7 @@ for encoding in utf8 cp932; do
         utf8) set -- -i ;;
         cp932) set -- ;;
     esac
-    for mode in roundtrip default compact operators labels; do
+    for mode in roundtrip default compact operators labels sample-config compact-config structured-config; do
         "$hspcmp" "$@" -u "--compath=$hsp_common/" "-o$test_dir/japanese-$encoding-$mode.ax" \
             "$test_dir/japanese-$encoding-$mode.hsp" > "$test_dir/japanese-$encoding-$mode.compile"
         test -s "$test_dir/japanese-$encoding-$mode.ax"

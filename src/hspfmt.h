@@ -14,6 +14,7 @@ enum class BlockComments { Preserve, Lines, Block };
 enum class Parentheses { Preserve, Add, Remove };
 enum class OperatorStyle { Preserve, Hsp, C };
 enum class FullWidthSpaces { Preserve, Normalize };
+enum class Spacing { Preserve, Space, Compact };
 
 // Every byte belongs to exactly one token, including trivia and the BOM.
 struct Token {
@@ -32,8 +33,14 @@ struct Options {
     Encoding encoding = Encoding::Utf8;
     FullWidthSpaces full_width_spaces = FullWidthSpaces::Preserve;
     unsigned indent_width = 4;
+    unsigned base_indent = 0;
+    unsigned loop_indent = 1;
+    bool preserve_indent = false;
     bool tabs = false;
-    bool binary_spaces = true;
+    Spacing operator_spacing = Spacing::Space;
+    Spacing comma_spacing = Spacing::Space;
+    Spacing colon_spacing = Spacing::Space;
+    Spacing comment_spacing = Spacing::Space;
     bool hsp_numeric_prefixes = false;
     bool short_if = false;
     unsigned line_width = 100;

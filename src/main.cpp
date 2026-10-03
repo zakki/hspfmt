@@ -79,9 +79,20 @@ hspfmt::OperatorStyle operator_style(const std::string &s) {
     throw std::runtime_error("invalid operator style: " + s);
 }
 
+hspfmt::Spacing spacing(const std::string &s) {
+    if (s == "preserve") return hspfmt::Spacing::Preserve;
+    if (s == "space") return hspfmt::Spacing::Space;
+    if (s == "compact") return hspfmt::Spacing::Compact;
+    throw std::runtime_error("invalid spacing mode: " + s);
+}
+
 bool parse_formatting_option(const std::string &arg, hspfmt::Options &options) {
     if (arg == "--tabs") options.tabs = true;
-    else if (arg == "--compact-operators") options.binary_spaces = false;
+    else if (arg == "--compact-operators") options.operator_spacing = hspfmt::Spacing::Compact;
+    else if (arg.rfind("--operator-spacing=", 0) == 0) options.operator_spacing = spacing(arg.substr(19));
+    else if (arg.rfind("--comma-spacing=", 0) == 0) options.comma_spacing = spacing(arg.substr(16));
+    else if (arg.rfind("--colon-spacing=", 0) == 0) options.colon_spacing = spacing(arg.substr(16));
+    else if (arg.rfind("--comment-spacing=", 0) == 0) options.comment_spacing = spacing(arg.substr(18));
     else if (arg == "--hsp-prefixes") options.hsp_numeric_prefixes = true;
     else if (arg == "--short-if") options.short_if = true;
     else if (arg.rfind("--full-width-spaces=", 0) == 0) {
@@ -115,7 +126,13 @@ bool parse_formatting_option(const std::string &arg, hspfmt::Options &options) {
     else if (arg.rfind("--blank-lines-before-defcfunc=", 0) == 0) options.blank_lines_before_defcfunc = blank_lines(arg.substr(30));
     else if (arg == "--encoding=cp932") options.encoding = hspfmt::Encoding::Cp932;
     else if (arg == "--encoding=utf8") options.encoding = hspfmt::Encoding::Utf8;
-    else if (arg.rfind("--indent=", 0) == 0) options.indent_width = number(arg.substr(9));
+    else if (arg.rfind("--base-indent=", 0) == 0) options.base_indent = number(arg.substr(14));
+    else if (arg.rfind("--loop-indent=", 0) == 0) options.loop_indent = number(arg.substr(14));
+    else if (arg.rfind("--indent=", 0) == 0) {
+        const auto value = arg.substr(9);
+        options.preserve_indent = value == "preserve";
+        if (!options.preserve_indent) options.indent_width = number(value);
+    }
     else if (arg.rfind("--line-width=", 0) == 0) options.line_width = number(arg.substr(13));
     else return false;
     return true;
@@ -168,8 +185,14 @@ int main(int argc, char **argv) {
                     "  --config=FILE        Load configuration file (default: .hspfmt)\n"
                     "  --no-config          Disable configuration file loading\n"
                     "  --stdin-filepath=PATH File path used in diagnostic messages for stdin\n"
-                    "  --indent=N --tabs    Indentation (default: 4 spaces)\n"
+                    "  --indent=N|preserve --tabs (default: 4 spaces)\n"
+                    "  --base-indent=N      Base indentation levels (0..16; default: 0)\n"
+                    "  --loop-indent=N      Indentation levels per loop (0..16; default: 1)\n"
                     "  --compact-operators Remove optional binary-operator spaces\n"
+                    "  --operator-spacing=preserve|space|compact (default: space)\n"
+                    "  --comma-spacing=preserve|space|compact (default: space after commas)\n"
+                    "  --colon-spacing=preserve|space|compact (default: space)\n"
+                    "  --comment-spacing=preserve|space|compact (before comments; default: space)\n"
                     "  --full-width-spaces=preserve|normalize (default: preserve)\n"
                     "  --hsp-prefixes       Convert 0x/0b to $/% (preserve digits)\n"
                     "  --operator-style=preserve|hsp|c (binary operator spelling)\n"

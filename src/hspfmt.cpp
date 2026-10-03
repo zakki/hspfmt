@@ -67,9 +67,11 @@ struct State {
     std::vector<Frame> blocks;
     unsigned function = 0;
     unsigned label = 0;
-    unsigned depth() const {
-        unsigned n = std::max(function, label);
-        for (const auto &frame : blocks) n += frame.case_body ? 2 : 1;
+    unsigned depth(const Options &options) const {
+        unsigned n = std::max({options.base_indent, function, label});
+        for (const auto &frame : blocks)
+            n += one_of(frame.close, {"loop", "wend", "next", "until"}) ? options.loop_indent :
+                 frame.case_body ? 2 : 1;
         return n;
     }
 };
@@ -540,22 +542,32 @@ std::string print_items(const std::vector<Item> &items, const Options &options,
         const bool postfix = one_of(text, {"+", "-", "++", "--"}) && i > 0 &&
             (next.empty() || next == ":" || next == "}" || items[i + 1].kind == Kind::Comment);
         bool space = i != 0;
+        bool preserve_gap = false;
         if (i) {
-            if (item.kind == Kind::Comment) space = true;
-            else if (text == ":" || prev == ":" || text == "{" || prev == "{" || text == "}" || prev == "}") space = true;
-            else if (text == "," || text == ")" || text == "]") space = false;
-            else if (prev == ",") space = true;
+            const auto apply_spacing = [&](Spacing mode) {
+                preserve_gap = mode == Spacing::Preserve;
+                space = mode != Spacing::Compact;
+            };
+            if (item.kind == Kind::Comment) apply_spacing(options.comment_spacing);
+            else if (text == ":" || prev == ":") apply_spacing(options.colon_spacing);
+            else if (text == "{" || prev == "{" || text == "}" || prev == "}") space = true;
+            else if (text == ",") {
+                preserve_gap = options.comma_spacing == Spacing::Preserve;
+                space = false;
+            }
+            else if (text == ")" || text == "]") space = false;
+            else if (prev == ",") apply_spacing(options.comma_spacing);
             else if (prev == "(" || prev == "[" || previous_prefix || postfix) space = false;
             else if (text == "(" || text == "[") space = !item.gap.empty();
             else if (text == "." || prev == "." || text == "@" || prev == "@") space = false;
-            else if (binary(word) || binary(lower(prev))) space = options.binary_spaces;
+            else if (binary(word) || binary(lower(prev))) apply_spacing(options.operator_spacing);
             // Do not merge word operators with operands when compact spacing is requested.
             if ((item.kind == Kind::Word && items[i - 1].kind == Kind::Word) ||
                 (item.kind == Kind::Number && items[i - 1].kind == Kind::Word) ||
                 (item.kind == Kind::Word && items[i - 1].kind == Kind::Number)) space = true;
             // First command argument must remain separated, even for unary signs/labels.
             if (previous_command && !item.gap.empty() && text != "=" &&
-                !postfix && !one_of(text, {"(", "[", ".", "@"})) space = true;
+                !postfix && !one_of(text, {"(", "[", ".", "@", ":", "{", "}"})) space = true;
             // Compact spacing must not create ++, --, /*, //, <=, etc.
             if (!space && !prev.empty() && !text.empty() &&
                 one_of(prev.substr(prev.size() - 1) + text.substr(0, 1),
@@ -569,8 +581,11 @@ std::string print_items(const std::vector<Item> &items, const Options &options,
             else if (text.substr(0, 2) == "0b") text.replace(0, 2, "%");
         }
         if (preserved_gaps[i]) {
-            const std::string desired = options.binary_spaces ? " " : "";
+            const std::string desired = options.operator_spacing == Spacing::Preserve ? item.gap :
+                options.operator_spacing == Spacing::Space ? " " : "";
             if (ambiguous_spacing && item.gap != desired) *ambiguous_spacing = true;
+            out += item.gap;
+        } else if (preserve_gap) {
             out += item.gap;
         } else if (space) out += ' ';
         out += text;
@@ -608,7 +623,7 @@ std::string print_items(const std::vector<Item> &items, const Options &options,
 
 // Only a complete, isolated one-line if with assignment statements is eligible.
 // No nested control flow, trailing statements, comments, or directive rewriting.
-std::vector<Item> short_if(std::vector<Item> items, const Options &options, unsigned depth) {
+std::vector<Item> short_if(std::vector<Item> items, const Options &options, std::size_t indent_size) {
     if (!options.short_if || items.size() < 7 || lower(items[0].text) != "if") return items;
     for (const auto &item : items) if (item.kind == Kind::Comment) return items;
     if (items.back().text != "}") return items;
@@ -642,7 +657,7 @@ std::vector<Item> short_if(std::vector<Item> items, const Options &options, unsi
             result.erase(result.begin() + 1);
         }
     }
-    if (print_items(operator_spelling(expression_parens(result, options), options), options).size() + depth * options.indent_width > options.line_width) return items;
+    if (print_items(operator_spelling(expression_parens(result, options), options), options).size() + indent_size > options.line_width) return items;
     return result;
 }
 
@@ -727,6 +742,8 @@ std::vector<Token> lex(std::string_view s, Encoding encoding) {
 std::string format(std::string_view source, const Options &options,
                    std::vector<Diagnostic> *diagnostics) {
     if (options.indent_width > 16) throw std::runtime_error("indent width must be between 0 and 16");
+    if (options.base_indent > 16) throw std::runtime_error("base indent must be between 0 and 16");
+    if (options.loop_indent > 16) throw std::runtime_error("loop indent must be between 0 and 16");
     for (const auto count : {options.blank_lines_before_module, options.blank_lines_before_deffunc,
                              options.blank_lines_before_defcfunc})
         if (count < -1 || count > 16) throw std::runtime_error("blank line count must be between 0 and 16, or -1 to preserve");
@@ -827,14 +844,18 @@ std::string format(std::string_view source, const Options &options,
                 else if ((first == "case" || first == "default") && !line_state.blocks.empty())
                     line_state.blocks.back().case_body = false;
             }
-            const unsigned depth = label ? 0 : line_state.depth();
+            const unsigned depth = label ? 0 : line_state.depth(options);
+            const auto indentation = raw.substr(0, raw.find_first_not_of(" \t"));
+            const auto indent_size = options.preserve_indent ? indentation.size() :
+                options.tabs ? depth : depth * options.indent_width;
             const bool following_else = options.short_if && !items.empty() &&
                 lower(items[0].text) == "if" && followed_by_else(next_token);
-            auto printed = following_else ? items : short_if(items, options, depth);
+            auto printed = following_else ? items : short_if(items, options, indent_size);
             printed = expression_parens(printed, options);
             printed = operator_spelling(std::move(printed), options);
             if (!items.empty()) {
-                out.append(options.tabs ? depth : depth * options.indent_width, options.tabs ? '\t' : ' ');
+                if (options.preserve_indent) out.append(indentation);
+                else out.append(indent_size, options.tabs ? '\t' : ' ');
                 bool ambiguous_spacing = false;
                 out += print_items(printed, options, &ambiguous_spacing);
                 if (ambiguous_spacing && diagnostics)
