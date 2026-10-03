@@ -20,6 +20,14 @@ void rejects(const std::string &input, hspfmt::Options options = {}) {
     try { hspfmt::format(input, options); } catch (const std::runtime_error &) { return; }
     throw std::runtime_error("expected rejection: " + input);
 }
+void rejects_at(const std::string &input, std::size_t line, hspfmt::Options options = {}) {
+    ++count;
+    try { hspfmt::format(input, options); } catch (const hspfmt::Error &error) {
+        if (error.line() == line) return;
+        throw std::runtime_error("expected rejection at line " + std::to_string(line) + ": " + error.what());
+    }
+    throw std::runtime_error("expected rejection: " + input);
+}
 void diagnostic_cases(const std::string &input, const std::string &expected,
                       const std::vector<hspfmt::Diagnostic> &warnings, hspfmt::Options options = {}) {
     expect(input, expected, options);
@@ -124,6 +132,17 @@ int main() {
         diagnostic_cases("foo *bar\n", "foo *bar\n", {{1, "foo *bar"}});
         diagnostic_cases("foo*bar\n", "foo*bar\n", {{1, "foo*bar"}});
         diagnostic_cases("foo * bar\n", "foo * bar\n", {});
+        // A bare global qualifier (name@) is a name like name@module.
+        diagnostic_cases("foo@ *bar\nfoo@*bar\n", "foo@ *bar\nfoo@*bar\n", {{1, "foo@ *bar"}, {2, "foo@*bar"}});
+        expect("x@=1\nx@ += 1\nx@=a*b\nmes x@, y@\n", "x@ = 1\nx@ += 1\nx@ = a * b\nmes x@, y@\n");
+        {
+            hspfmt::Options styled;
+            styled.operator_style = hspfmt::OperatorStyle::C;
+            styled.increment_style = hspfmt::OperatorStyle::C;
+            expect("x@=a=b\nx@+\nx@(1)=a=b\n", "x@ = a == b\nx@++\nx@(1) = a == b\n", styled);
+            styled.operator_spacing = hspfmt::Spacing::Compact;
+            expect("x@ = 1\nx@ += 1\n", "x@=1\nx@+=1\n", styled);
+        }
         diagnostic_cases("foo\t*\tbar\n", "foo\t*\tbar\n", {{1, "foo\t*\tbar"}});
         diagnostic_cases("foo@mod*bar,2*3\n", "foo@mod*bar, 2 * 3\n", {{1, "foo@mod*bar,2*3"}});
         diagnostic_cases("foo /* head */ *bar\n", "foo /* head */ *bar\n", {{1, "foo /* head */ *bar"}});
@@ -298,6 +317,22 @@ int main() {
                "\xef\xbb\xbf; hspfmt: ignore\r\n a   =1\r\nx = 2");
         expect("; hspfmt: ignore\na   =1", "; hspfmt: ignore\na   =1");
         expect("; hspfmt: ignore", "; hspfmt: ignore");
+        // Trailing blanks after a marker must not silently disable it.
+        expect("; hspfmt: off \t\nx=1\n; hspfmt: on \r\nx=2\n; hspfmt: ignore  \ny  =1\nz=1\n",
+               "; hspfmt: off \t\nx=1\n; hspfmt: on \r\nx = 2\n; hspfmt: ignore  \ny  =1\nz = 1\n");
+        {
+            hspfmt::Options normalized;
+            normalized.full_width_spaces = hspfmt::FullWidthSpaces::Normalize;
+            expect("; hspfmt: off \nmes\xe3\x80\x80" "1\n; hspfmt: on \nmes\xe3\x80\x80" "1\n",
+                   "; hspfmt: off \nmes\xe3\x80\x80" "1\n; hspfmt: on \nmes 1\n", normalized);
+        }
+        {
+            // Assignment operators cannot start a command argument, so compact spacing applies.
+            hspfmt::Options compact;
+            compact.operator_spacing = hspfmt::Spacing::Compact;
+            expect("a += 1\nb+=1\nc -= d * 2\nd \\= 2\nfoo -1\na +2\nx = 1\n",
+                   "a+=1\nb+=1\nc-=d*2\nd\\=2\nfoo -1\na +2\nx=1\n", compact);
+        }
         expect("; hspfmt: ignore\n  \nx=1\n", "; hspfmt: ignore\n  \nx = 1\n");
         expect("; hspfmt: ignore\n  ; kept\nx=1\n", "; hspfmt: ignore\n  ; kept\nx = 1\n");
         expect("; hspfmt: ignore\n; hspfmt: ignore\nx=1\ny=2\n",
@@ -307,7 +342,11 @@ int main() {
         expect("mes \"; hspfmt: ignore\"\na=1 ; hspfmt: ignore\nb=2\n"
                "// hspfmt: ignore\nc=3\n/* hspfmt: ignore */\nd=4\n",
                "mes \"; hspfmt: ignore\"\na = 1 ; hspfmt: ignore\nb = 2\n"
-               "// hspfmt: ignore\nc = 3\n/* hspfmt: ignore */\nd = 4\n");
+               "// hspfmt: ignore\nc=3\n/* hspfmt: ignore */\nd = 4\n");
+        // Both line comment markers are accepted and can be mixed.
+        expect("// hspfmt: off\nx=1\n; hspfmt: on\ny=2\n; hspfmt: off\nz=3\n// hspfmt: on \nw=4\n",
+               "// hspfmt: off\nx=1\n; hspfmt: on\ny = 2\n; hspfmt: off\nz=3\n// hspfmt: on \nw = 4\n");
+        expect("//hspfmt: off\nx=1\n;hspfmt: ignore\ny=2\n", "//hspfmt: off\nx = 1\n;hspfmt: ignore\ny = 2\n");
         expect("; hspfmt: ignore\n repeat  2\nx=1\n; hspfmt: ignore\n  loop\ny=2\n",
                "; hspfmt: ignore\n repeat  2\n    x = 1\n; hspfmt: ignore\n  loop\ny = 2\n");
         expect("; hspfmt: ignore\n if a {\nx=1\n; hspfmt: ignore\n  }\ny=2\n",
@@ -489,7 +528,9 @@ int main() {
                          {{2, "foo*bar // tail"}}, options);
         expect("// hello\nx=1 // tail\nmes \"// stays\"\n", "; hello\nx = 1 ; tail\nmes \"// stays\"\n", options);
         expect("#define f x // stays\nx = 1 + \\\n  2 // stays\n", "#define f x // stays\nx = 1 + \\\n  2 // stays\n", options);
-        expect("// hspfmt: off\nx=1\n", "// hspfmt: off\nx = 1\n", options);
+        // Markers keep their spelling while other comments are converted.
+        expect("// hspfmt: off\nx=1 // kept\n// hspfmt: on\nx=2 // tail\n",
+               "// hspfmt: off\nx=1 // kept\n// hspfmt: on\nx = 2 ; tail\n", options);
         options.comment_style = hspfmt::CommentStyle::C;
         expect("; hello\nx=1 ; tail\n; hspfmt: off\nx=2 ; kept\n; hspfmt: on\nx=3\n",
                "// hello\nx = 1 // tail\n; hspfmt: off\nx=2 ; kept\n; hspfmt: on\nx = 3\n", options);
@@ -621,6 +662,16 @@ int main() {
         rejects("mes \"\xc0\x80\"\n");
         rejects("mes \"\xed\xa0\x80\"\n");
         rejects(std::string("a\0b", 3));
+        // Errors report the physical line of the failure, or where an unterminated construct starts.
+        rejects_at("x=1\r\ny=2\r\nmes \"open\r\n", 3);
+        rejects_at("x=1\n/* open\n\n", 2);
+        rejects_at("x=1\r\rmes \"a\xc0\"\n", 3);
+        rejects_at("s={\"\n\n\"} : wend\n", 1);
+        rejects_at("x=1\nrepeat\nwhile 1\nwend\n", 2);
+        rejects_at("x=1\n\nloop\n", 3);
+        rejects_at("switch a\nswend\ncase 1\n", 3);
+        rejects_at("x=1\n#ifdef A\nrepeat\nloop\n", 2);
+        rejects_at("repeat\n#if A\nloop\n#else\n#endif\nloop\n", 5);
         std::cout << count << " formatter cases passed\n";
         return 0;
     } catch (const std::exception &error) {

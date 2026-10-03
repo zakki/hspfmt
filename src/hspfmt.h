@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -57,7 +58,21 @@ struct Options {
     OperatorStyle increment_style = OperatorStyle::Preserve;
 };
 
-// Invalid/unterminated input throws std::runtime_error. No source is modified.
+// Input and syntax errors. line() is the 1-based physical input line, or 0
+// when unknown; what() includes it as a "line N: " prefix.
+class Error : public std::runtime_error {
+public:
+    Error(const std::string &message, std::size_t line)
+        : std::runtime_error(line ? "line " + std::to_string(line) + ": " + message : message),
+          message_(message), line_(line) {}
+    const std::string &message() const { return message_; }
+    std::size_t line() const { return line_; }
+private:
+    std::string message_;
+    std::size_t line_;
+};
+
+// Invalid/unterminated input throws Error. No source is modified.
 std::vector<Token> lex(std::string_view source, Encoding encoding);
 // Diagnostics are appended when requested; the library does not write to stderr.
 std::string format(std::string_view source, const Options &options = {},

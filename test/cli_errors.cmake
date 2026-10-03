@@ -33,12 +33,39 @@ if(NOT "${after}" STREQUAL "${source}")
     message(FATAL_ERROR "empty config path changed the input file")
 endif()
 
-expect_error("hspfmt: invalid.hsp: unterminated block" --check valid.hsp invalid.hsp)
-expect_error("hspfmt: invalid-string.hsp: unterminated string" --roundtrip invalid-string.hsp)
+expect_error("hspfmt: invalid.hsp:1: unterminated block, expected loop" --check valid.hsp invalid.hsp)
+expect_error("hspfmt: invalid-string.hsp:1: unterminated string" --roundtrip invalid-string.hsp)
 expect_error("hspfmt: missing.hsp: cannot open input file" --check valid.hsp missing.hsp)
+expect_error("numeric option too large: 99999999999999999999999" --no-config --indent=99999999999999999999999 valid.hsp)
+
+# Errors report the line where an unterminated construct starts or a mismatch occurs.
+file(WRITE "${test_dir}/late-string.hsp" "x = 1\r\ny = 2\r\nmes \"open\r\n")
+file(WRITE "${test_dir}/late-block.hsp" "x = 1\nrepeat\nwhile 1\nwend\n")
+file(WRITE "${test_dir}/late-close.hsp" "x = 1\n\nloop\n")
+expect_error("hspfmt: late-string.hsp:3: newline in quoted string" --no-config late-string.hsp)
+expect_error("hspfmt: late-block.hsp:2: unterminated block, expected loop" --no-config late-block.hsp)
+expect_error("hspfmt: late-close.hsp:3: unmatched block terminator: loop" --no-config late-close.hsp)
+
+# --check names every file that would change.
+file(WRITE "${test_dir}/unformatted.hsp" "x=1\n")
+execute_process(COMMAND "${FORMATTER}" --no-config --check valid.hsp unformatted.hsp
+    WORKING_DIRECTORY "${test_dir}"
+    RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE diagnostic)
+if(NOT "${status}" STREQUAL "1" OR NOT "${output}" STREQUAL "" OR
+   NOT "${diagnostic}" STREQUAL "hspfmt: unformatted.hsp: formatting differs\n")
+    message(FATAL_ERROR "--check did not report the changed file: ${status}: ${output}${diagnostic}")
+endif()
+
+# --write formats every input before replacing any of them.
+expect_error("hspfmt: invalid.hsp:1: unterminated block" --no-config --write unformatted.hsp invalid.hsp)
+file(READ "${test_dir}/unformatted.hsp" after)
+if(NOT "${after}" STREQUAL "x=1\n")
+    message(FATAL_ERROR "--write replaced a file although another input was rejected")
+endif()
+
 set(input "${test_dir}/invalid.hsp")
-expect_error("hspfmt: virtual/path.hsp: unterminated block" --stdin-filepath=virtual/path.hsp -)
-expect_error("hspfmt: <stdin>: unterminated block" -)
+expect_error("hspfmt: virtual/path.hsp:1: unterminated block" --stdin-filepath=virtual/path.hsp -)
+expect_error("hspfmt: <stdin>:1: unterminated block" -)
 
 # Full-width space modes work in configs, with explicit CLI overrides.
 set(input "${test_dir}/full-space.hsp")

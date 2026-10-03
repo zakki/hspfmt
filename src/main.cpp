@@ -5,8 +5,10 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
-#include <stdexcept>
 #include <random>
+#include <stdexcept>
+#include <utility>
+#include <vector>
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
@@ -53,8 +55,12 @@ void replace_file(const fs::path &path, const std::string &output) {
 unsigned number(const std::string &s) {
     if (s.empty() || s.find_first_not_of("0123456789") != std::string::npos)
         throw std::runtime_error("invalid numeric option: " + s);
+    // Reject long values before stoul, which would throw an opaque out_of_range.
+    const auto significant = s.find_first_not_of('0');
+    if (significant != std::string::npos && s.size() - significant > 5)
+        throw std::runtime_error("numeric option too large: " + s);
     const auto value = std::stoul(s);
-    if (value > 10000) throw std::runtime_error("numeric option too large");
+    if (value > 10000) throw std::runtime_error("numeric option too large: " + s);
     return static_cast<unsigned>(value);
 }
 
@@ -271,6 +277,8 @@ int main(int argc, char **argv) {
 #endif
 
         bool has_diff = false;
+        // Format every input before replacing any, so a rejected file leaves all inputs unchanged.
+        std::vector<std::pair<std::string, std::string>> replacements;
         for (const auto &filename : filenames) {
             input_name = filename == "-"
                 ? (!stdin_filepath.empty() ? stdin_filepath : "<stdin>")
@@ -303,17 +311,32 @@ int main(int argc, char **argv) {
                 }
             }
             if (check) {
-                if (output != source) has_diff = true;
+                if (output != source) {
+                    has_diff = true;
+                    std::cerr << "hspfmt: " << input_name << ": formatting differs\n";
+                }
             } else if (write) {
-                if (output != source) replace_file(filename, output);
+                if (output != source) replacements.emplace_back(filename, std::move(output));
             } else {
                 std::cout.write(output.data(), static_cast<std::streamsize>(output.size()));
                 std::cout.flush();
                 if (!std::cout) throw std::runtime_error("output write failed");
             }
         }
+        for (const auto &replacement : replacements) {
+            input_name = replacement.first;
+            replace_file(replacement.first, replacement.second);
+        }
         if (check) return has_diff ? 1 : 0;
         return 0;
+    } catch (const hspfmt::Error &error) {
+        std::cerr << "hspfmt: ";
+        if (!input_name.empty()) {
+            std::cerr << input_name;
+            if (error.line()) std::cerr << ':' << error.line();
+            std::cerr << ": " << error.message() << '\n';
+        } else std::cerr << error.what() << '\n';
+        return 2;
     } catch (const std::exception &error) {
         std::cerr << "hspfmt: ";
         if (!input_name.empty()) std::cerr << input_name << ": ";
