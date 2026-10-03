@@ -17,6 +17,14 @@ build/hspfmt --write script.hsp
 
 Visual Studioなどの複数構成ジェネレータでは、実行ファイルは `build/Release/hspfmt.exe` に生成されます。テスト用ツールのビルドを省く場合は、CMakeの構成時に `-DBUILD_TESTING=OFF` を指定します。
 
+### GitHub ActionsとWindows用ZIP
+
+[CIワークフロー](.github/workflows/ci.yml) は、push・pull request・手動実行（`workflow_dispatch`）時にLinux（`ubuntu-latest`）とWindows（`windows-latest`）でReleaseビルド、CTest、`test/` のcorpus検証を実行します。OpenHSPを必要とする統合テストはCIの対象外です。
+
+Windowsの検証が成功すると、64bit版の `hspfmt.exe`、`README.md`、`LICENSE`、`.hspfmt.example`、`presets/` を同梱した `hspfmt-windows-x64.zip` を生成します。MSVCランタイムは静的リンクします。
+
+GitHubの **Actions → CI → 対象の実行 → Artifacts** からZIPをダウンロードできます。展開後は `hspfmt.exe script.hsp` のように実行してください。Artifactsには保存期限があり、GitHub Releasesへの自動公開は行いません。
+
 ### 入出力と終了コード
 
 ファイル名を省略するか `-` を指定すると標準入力を読み込みます。

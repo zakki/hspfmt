@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            configure_args: ""
+            corpus: ./build/hspfmt_corpus
+          - os: windows-latest
+            configure_args: -A x64 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+            corpus: ./build/Release/hspfmt_corpus.exe
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Configure
+        run: cmake -S src -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON ${{ matrix.configure_args }}
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure --no-tests=error
+
+      - name: Check corpus invariants
+        run: ${{ matrix.corpus }} test
+
+      - name: Stage Windows package
+        if: runner.os == 'Windows'
+        run: |
+          cmake -E make_directory build/package
+          cmake -E copy build/Release/hspfmt.exe README.md LICENSE .hspfmt.example build/package/
+          cmake -E copy_directory presets build/package/presets
+
+      - name: Create Windows ZIP
+        if: runner.os == 'Windows'
+        working-directory: build/package
+        run: cmake -E tar cf ../hspfmt-windows-x64.zip --format=zip -- hspfmt.exe README.md LICENSE .hspfmt.example presets
+
+      - name: Upload Windows ZIP
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          path: build/hspfmt-windows-x64.zip
+          archive: false
+          if-no-files-found: error
