@@ -250,8 +250,8 @@ std::string rewrite_comments(std::string_view source, const Options &options) {
     return out;
 }
 
-std::string declaration_spacing(std::string_view source, const Options &options) {
-    if (options.blank_lines_before_module < 0 && options.blank_lines_before_deffunc < 0 &&
+std::string declaration_layout(std::string_view source, const Options &options) {
+    if (options.preserve_indent && options.blank_lines_before_module < 0 && options.blank_lines_before_deffunc < 0 &&
         options.blank_lines_before_defcfunc < 0) return std::string(source);
     const auto tokens = lex(source, options.encoding);
     const auto lines = source_lines(source, tokens);
@@ -259,14 +259,18 @@ std::string declaration_spacing(std::string_view source, const Options &options)
     std::size_t copied = 0;
     for (std::size_t i = 0; i < lines.size(); ++i) {
         const auto &line = lines[i];
-        if (line.opaque || line.multiline || !line.directive || line.first + 1 >= line.last) continue;
+        if (line.opaque || line.multiline || line.first + 1 >= line.last) continue;
         const auto &token = tokens[line.first + 1];
-        const auto directive = lower(source.substr(token.begin, token.end - token.begin));
+        const auto &first = tokens[line.first];
+        const bool label = first.kind == Kind::Symbol && source.substr(first.begin, first.end - first.begin) == "*" &&
+            token.kind == Kind::Word;
+        if (!line.directive && !label) continue;
+        const auto directive = line.directive ? lower(source.substr(token.begin, token.end - token.begin)) : "";
         int count = -1;
         if (directive == "module") count = options.blank_lines_before_module;
         else if (directive == "deffunc") count = options.blank_lines_before_deffunc;
         else if (directive == "defcfunc") count = options.blank_lines_before_defcfunc;
-        if (count < 0) continue;
+        else if (!label && !one_of(directive, {"modfunc", "modcfunc", "modinit", "modterm"})) continue;
         std::size_t start = i;
         while (start > 0) {
             const auto &previous = lines[start - 1];
@@ -276,18 +280,66 @@ std::string declaration_spacing(std::string_view source, const Options &options)
             --start;
         }
         const auto content = start;
-        while (start > 0 && !lines[start - 1].opaque && lines[start - 1].first == lines[start - 1].last) --start;
+        if (count < 0 && (options.preserve_indent || content == i)) continue;
+        if (count >= 0)
+            while (start > 0 && !lines[start - 1].opaque && lines[start - 1].first == lines[start - 1].last) --start;
         if (lines[start].begin < copied) continue;
         out.append(source.substr(copied, lines[start].begin - copied));
         // No leading blank lines, including for a file starting with a BOM.
-        const bool at_start = start == 0;
+        const bool at_start = count >= 0 && start == 0;
         if (at_start && source.substr(0, 3) == "\xef\xbb\xbf") out += "\xef\xbb\xbf";
         const auto newline = start > 0 ? lines[start - 1].newline : line.newline;
         if (!at_start) for (int n = 0; n < count; ++n) out.append(newline);
         copied = lines[content].begin;
         if (at_start && copied == 0 && source.substr(0, 3) == "\xef\xbb\xbf") copied = 3;
+        if (!options.preserve_indent) {
+            const auto indentation = source.substr(line.begin, tokens[line.first].begin - line.begin);
+            for (auto j = content; j < i; ++j) {
+                const auto &comment = lines[j];
+                if (copied == 0 && source.substr(0, 3) == "\xef\xbb\xbf") out += "\xef\xbb\xbf";
+                out.append(indentation);
+                out.append(source.substr(tokens[comment.first].begin, comment.end - tokens[comment.first].begin));
+                out.append(comment.newline);
+                copied = comment.end + comment.newline.size();
+            }
+        }
     }
     out.append(source.substr(copied));
+    return out;
+}
+
+// Only standard, single-line typed parameter lists are eligible. Preserve all
+// gaps except those adjacent to commas, including directive/comment spacing.
+std::string declaration_commas(std::string_view raw, const std::vector<Item> &items, const Options &options) {
+    if (options.comma_spacing == Spacing::Preserve || items.size() < 3 ||
+        !one_of(lower(items[1].text), {"deffunc", "defcfunc"})) return std::string(raw);
+    auto last = items.size();
+    if (items.back().kind == Kind::Comment) --last;
+    std::size_t pos = 2;
+    if (pos < last && lower(items[pos].text) == "local") ++pos;
+    if (pos == last || items[pos].kind != Kind::Word || lower(items[pos].text) == "prep") return std::string(raw);
+    ++pos;
+    while (pos < last) {
+        if (pos + 1 >= last || items[pos].kind != Kind::Word ||
+            !one_of(lower(items[pos].text), {"int", "double", "str", "var", "array", "label", "local"}) ||
+            items[pos + 1].kind != Kind::Word) return std::string(raw);
+        pos += 2;
+        if (pos == last) break;
+        if (items[pos].text != "," || ++pos == last) return std::string(raw);
+    }
+    std::string out;
+    std::size_t consumed = 0;
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        const auto &item = items[i];
+        if (item.text != ",") {
+            if (i > 0 && items[i - 1].text == ",") {
+                if (options.comma_spacing == Spacing::Space) out += ' ';
+            } else out += item.gap;
+        }
+        out += item.text;
+        consumed += item.gap.size() + item.text.size();
+    }
+    out.append(raw.substr(consumed));
     return out;
 }
 void close_block(State &state, std::string_view close) {
@@ -564,7 +616,10 @@ std::string print_items(const std::vector<Item> &items, const Options &options,
             else if (text == ")" || text == "]") space = false;
             else if (prev == ",") apply_spacing(options.comma_spacing);
             else if (prev == "(" || prev == "[" || previous_prefix || postfix) space = false;
-            else if (text == "(" || text == "[") space = !item.gap.empty();
+            else if (text == "(" || text == "[") {
+                if (binary(lower(prev))) apply_spacing(options.operator_spacing);
+                else space = !item.gap.empty();
+            }
             else if (text == "." || prev == "." || text == "@" || prev == "@") space = false;
             else if (binary(word) || binary(lower(prev))) apply_spacing(options.operator_spacing);
             // Do not merge word operators with operands when compact spacing is requested.
@@ -874,7 +929,11 @@ std::string format(std::string_view source, const Options &options,
         }
         if (!opaque && label && options.indent_labels) state.label = 1;
         if (!opaque && (items.empty() || items[0].text != "#")) parse_line(items, state);
-        if (preserve) out.append(raw);
+        if (preserve) {
+            if (!opaque && !protected_line && !was_ignored && !items.empty() && items[0].text == "#")
+                out += declaration_commas(raw, items, options);
+            else out.append(raw);
+        }
         out.append(newline);
         continuation = next_continuation;
         items.clear();
@@ -904,7 +963,7 @@ std::string format(std::string_view source, const Options &options,
     if (begin < source.size()) flush(source.size(), "", tokens.size());
     if (!conditionals.empty()) throw std::runtime_error("unterminated preprocessor conditional");
     if (!state.blocks.empty()) throw std::runtime_error("unterminated block, expected " + state.blocks.back().close);
-    return declaration_spacing(out, options);
+    return declaration_layout(out, options);
 }
 
 } // namespace hspfmt

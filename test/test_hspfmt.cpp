@@ -50,6 +50,12 @@ int main() {
                 ? u8"\u3000" : "\x81\x40";
             const std::string sum = encoding == hspfmt::Encoding::Utf8
                 ? u8"\u52a0\u7b97" : "\x89\xc1\x8e\x5a";
+            expect("#deffunc " + sum + " str " + kanji + ",int " + hiragana + "\r\nreturn\r\n; " + table +
+                   "\r\n#defcfunc next int " + kanji + ",str " + hiragana,
+                   "#deffunc " + sum + " str " + kanji + ", int " + hiragana + "\r\n    return\r\n; " + table +
+                   "\r\n#defcfunc next int " + kanji + ", str " + hiragana, japanese);
+            expect("#deffunc f\r\nreturn\r\n; " + table + "\r\n*" + kanji,
+                   "#deffunc f\r\n    return\r\n; " + table + "\r\n*" + kanji, japanese);
             expect(kanji + "=2\n" + hiragana + "=3\n" + table + "=" + kanji + "+" + hiragana + "\n",
                    kanji + " = 2\n" + hiragana + " = 3\n" + table + " = " + kanji + " + " + hiragana + "\n", japanese);
             expect(kanji + "A1=" + hiragana + "2*3\n",
@@ -141,7 +147,95 @@ int main() {
                "switch x\n    case 1\n        a = 2\n        swbreak\n    default\n        a = 3\nswend\n");
         expect("if flag {\na=1\n} else {\na=2\n}\n", "if flag {\n    a = 1\n} else {\n    a = 2\n}\n");
         expect("#deffunc foo int p\nx=1\nreturn\n#global\nx=2\n", "#deffunc foo int p\n    x = 1\n    return\n#global\nx = 2\n");
+        expect("a=x+(y-1)\na=(x)+(y)\na=-(y-1)\na=f(x)+(g(y))\na=(x)*(y)\n",
+               "a = x + (y - 1)\na = (x) + (y)\na = -(y - 1)\na = f(x) + (g(y))\na = (x) * (y)\n");
+        expect("a=x+[y]\na=f (x)\na=b (y)\na=+(y)\n",
+               "a = x + [y]\na = f (x)\na = b (y)\na = +(y)\n");
+        expect("#deffunc f str p_path,int p_access ,\tlocal p_tmp ; keep , comma\nreturn\n"
+               "#defcfunc local g double p_x,\tint p_y\nreturn p_x+(p_y-1)\n",
+               "#deffunc f str p_path, int p_access, local p_tmp ; keep , comma\n    return\n"
+               "#defcfunc local g double p_x, int p_y\n    return p_x + (p_y - 1)\n");
+        expect("\t#DeFfUnC  f  VAR p_a ,ARRAY p_b,LABEL p_c  // keep\r\nreturn\r\n",
+               "\t#DeFfUnC  f  VAR p_a, ARRAY p_b, LABEL p_c  // keep\r\n    return\r\n");
+        for (const std::string declaration : {
+                 "#define f(%1,%2) %1,%2", "#module m p_a,p_b", "#modfunc f int p_a,int p_b",
+                 "#deffunc prep f int p_a,int p_b", "#deffunc f PARAMS",
+                 "#deffunc f custom p_a,int p_b", "#deffunc f int p_a,,int p_b",
+                 "#deffunc f int p_a,", "#deffunc f int p_a,2",
+                 "#deffunc f int p_a /* middle */,int p_b", "#deffunc f int p_a@mod,int p_b",
+                 "#deffunc f onexit"}) {
+            expect(declaration + "\n", declaration + "\n");
+        }
+        expect("#deffunc f int p_a,\\\n int p_b\nreturn\n",
+               "#deffunc f int p_a,\\\n int p_b\nreturn\n");
+        expect("; hspfmt: ignore\n#deffunc f int p_a,int p_b\nreturn\n",
+               "; hspfmt: ignore\n#deffunc f int p_a,int p_b\n    return\n");
+        expect("; hspfmt: off\n#deffunc f int p_a,int p_b\n; hspfmt: on\n",
+               "; hspfmt: off\n#deffunc f int p_a,int p_b\n; hspfmt: on\n");
+        expect("#deffunc f\nreturn\n; docs for g\n// second line\n#defcfunc g\nreturn 1\n",
+               "#deffunc f\n    return\n; docs for g\n// second line\n#defcfunc g\n    return 1\n");
+        expect("#deffunc f\nreturn\n  /* docs\n    keep interior */\n#deffunc g\nreturn\n",
+               "#deffunc f\n    return\n/* docs\n    keep interior */\n#deffunc g\n    return\n");
+        expect("#deffunc f\nreturn\n; body comment\n\n#deffunc g\nreturn\n",
+               "#deffunc f\n    return\n    ; body comment\n\n#deffunc g\n    return\n");
+        expect("#deffunc f\nreturn\n; hspfmt: ignore\n  ; keep docs\n#deffunc g\nreturn\n",
+               "#deffunc f\n    return\n; hspfmt: ignore\n  ; keep docs\n#deffunc g\n    return\n");
+        expect("\xef\xbb\xbf" "  ; docs\r\n#defcfunc f int p_a,int p_b",
+               "\xef\xbb\xbf" "; docs\r\n#defcfunc f int p_a, int p_b");
+        {
+            hspfmt::Options docs;
+            docs.tabs = true;
+            docs.base_indent = 2;
+            expect("#deffunc f\nreturn\n; docs\n\t#modfunc g\nreturn\n",
+                   "#deffunc f\n\t\treturn\n\t; docs\n\t#modfunc g\n\t\treturn\n", docs);
+            docs.preserve_indent = true;
+            expect("#deffunc f\n\treturn\n\t  ; docs\n#deffunc g int p_a,int p_b\n",
+                   "#deffunc f\n\treturn\n\t  ; docs\n#deffunc g int p_a, int p_b\n", docs);
+            docs.blank_lines_before_deffunc = 1;
+            expect("#deffunc f\n\treturn\n\t  ; docs\n#deffunc g\n",
+                   "#deffunc f\n\treturn\n\n\t  ; docs\n#deffunc g\n", docs);
+            docs = {};
+            docs.blank_lines_before_deffunc = 1;
+            docs.block_comments = hspfmt::BlockComments::Lines;
+            expect("#deffunc f\nreturn\n  /* docs\nmore */\n#deffunc g\nreturn\n",
+                   "#deffunc f\n    return\n\n; docs\n;more \n#deffunc g\n    return\n", docs);
+            docs.block_comments = hspfmt::BlockComments::Block;
+            expect("#deffunc f\nreturn\n; docs\n; more\n#deffunc g\nreturn\n",
+                   "#deffunc f\n    return\n\n/* docs\n more*/\n#deffunc g\n    return\n", docs);
+        }
         expect("*main\ngoto *main\na=a*2+-1\n", "*main\ngoto *main\na = a * 2 + -1\n");
+        {
+            hspfmt::Options labels;
+            labels.indent_labels = true;
+            expect("*first\nx=1\n; docs\n// second line\n  *second\nx=2\n",
+                   "*first\n    x = 1\n; docs\n// second line\n*second\n    x = 2\n", labels);
+            expect("*first\nx=1\n  /* docs\n    keep interior */\n*second\nx=2\n",
+                   "*first\n    x = 1\n/* docs\n    keep interior */\n*second\n    x = 2\n", labels);
+            expect("*first\nx=1\n; body comment\n\n*second\nx=2\n",
+                   "*first\n    x = 1\n    ; body comment\n\n*second\n    x = 2\n", labels);
+            expect("*first\n; operand comment\nx=*second\n",
+                   "*first\n    ; operand comment\n    x = *second\n", labels);
+            expect("*first\n; hspfmt: ignore\n  ; keep docs\n*second\n",
+                   "*first\n; hspfmt: ignore\n  ; keep docs\n*second\n", labels);
+            expect("*first\n; docs\n; hspfmt: ignore\n  *second\n",
+                   "*first\n    ; docs\n; hspfmt: ignore\n  *second\n", labels);
+            expect("; hspfmt: off\n  ; docs\n  *second\n; hspfmt: on\n",
+                   "; hspfmt: off\n  ; docs\n  *second\n; hspfmt: on\n", labels);
+            expect("\xef\xbb\xbf" "  ; docs\r\n  *first", "\xef\xbb\xbf" "; docs\r\n*first", labels);
+            labels.tabs = true;
+            labels.base_indent = 2;
+            expect("*first\n; docs\n*second\nx=2\n",
+                   "*first\n; docs\n*second\n\t\tx = 2\n", labels);
+            labels.preserve_indent = true;
+            labels.blank_lines_before_deffunc = 1;
+            expect("*first\n\t  ; docs\n\t*second\n",
+                   "*first\n\t  ; docs\n\t*second\n", labels);
+            labels = {};
+            labels.base_indent = 1;
+            labels.block_comments = hspfmt::BlockComments::Lines;
+            expect("/* docs\nmore */\n*first\nx=1\n",
+                   "; docs\n;more \n*first\n    x = 1\n", labels);
+        }
         expect("onclick gosub *queue_mouse_click\nonkey goto *key\nonexit gosub *exit\n"
                "onerror goto *error\noncmd gosub *message,100+2\n",
                "onclick gosub *queue_mouse_click\nonkey goto *key\nonexit gosub *exit\n"
@@ -316,6 +410,8 @@ int main() {
         expect("\t  if flag { x=1 }\n", "\t  if flag { x = 1 }\n", options);
         options = {};
         options.operator_spacing = hspfmt::Spacing::Preserve;
+        expect("a=x+(y-1)\na = x +  (y)\na=x\t+\t(y)\n",
+               "a=x+(y-1)\na = x +  (y)\na=x\t+\t(y)\n", options);
         expect("a=1\nb = 2+3 * 4\nc\t=\t5 +6\nx=a - -1\n",
                "a=1\nb = 2+3 * 4\nc\t=\t5 +6\nx=a - -1\n", options);
         diagnostic_cases("foo*bar\nfoo\t* bar\n", "foo*bar\nfoo\t* bar\n", {}, options);
@@ -323,9 +419,13 @@ int main() {
         expect("x=a=b & c!d\n", "x=a==b && c!=d\n", options);
         options = {};
         options.comma_spacing = hspfmt::Spacing::Preserve;
+        expect("#deffunc f str p_path,int p_access ,\tlocal p_tmp\n",
+               "#deffunc f str p_path,int p_access ,\tlocal p_tmp\n", options);
         expect("mes 1,, 3 ,4\nx=f(1,\t2 ,3)\n",
                "mes 1,, 3 ,4\nx = f(1,\t2 ,3)\n", options);
         options.comma_spacing = hspfmt::Spacing::Compact;
+        expect("#defcfunc local f int p_a , int p_b  ; keep\n",
+               "#defcfunc local f int p_a,int p_b  ; keep\n", options);
         expect("mes -1, -2, *label\nx=f(1 , 2)\n", "mes -1,-2,*label\nx = f(1,2)\n", options);
         options = {};
         options.colon_spacing = hspfmt::Spacing::Preserve;
@@ -355,6 +455,8 @@ int main() {
                "\t\x95\x5c=1:mes \x95\x5c\t; \x95\x5c\r\n", options);
         options = {};
         options.operator_spacing = hspfmt::Spacing::Compact;
+        expect("a = x + (y - 1)\na = (x) * (y)\na = - (y)\n",
+               "a=x+(y-1)\na=(x)*(y)\na=-(y)\n", options);
         expect("a=1d:b=2D:c=%_0010\n", "a=1d : b=2D : c=%_0010\n", options);
         diagnostic_cases("foo*bar\n", "foo*bar\n", {}, options);
         diagnostic_cases("foo *bar\n", "foo *bar\n", {{1, "foo *bar"}}, options);
@@ -423,7 +525,7 @@ int main() {
         expect("if flag { x=1 }\n", "if (flag) { x = 1 }\n", options);
         options = {};
         options.condition_parens = hspfmt::Parentheses::Remove;
-        expect("if ((flag)) : x=1\nwhile ((a)+(b))\nx=2\nwend\n", "if flag : x = 1\nwhile (a) +(b)\n    x = 2\nwend\n", options);
+        expect("if ((flag)) : x=1\nwhile ((a)+(b))\nx=2\nwend\n", "if flag : x = 1\nwhile (a) + (b)\n    x = 2\nwend\n", options);
         expect("if (-a) : x=1\nif (a) & (b) : y=1\n", "if -a : x = 1\nif (a) & (b) : y = 1\n", options);
         options = {};
         options.repeat_parens = hspfmt::Parentheses::Add;
