@@ -114,6 +114,14 @@ onerror goto *report
 oncmd gosub *report,100+2
 button gosub "report",*report
 }
+; Preserve a manually arranged row, while continuing to parse loop boundaries.
+; hspfmt: ignore
+probe_row = 1,  10, 100
+; hspfmt: ignore
+repeat  1
+mes str(probe_row(0))+","+str(probe_row(1))+","+str(probe_row(2))
+; hspfmt: ignore
+  loop
 mes "hspfmt integration ok"
 end
 

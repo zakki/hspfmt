@@ -98,6 +98,12 @@ int main() {
                    "#const " + kanji + " 1\nmes 1,\\\n 2\n", normalized);
             expect("; hspfmt: off\nmes" + full_space + kanji + "\n; hspfmt: on\nmes" + full_space + kanji + "\n",
                    "; hspfmt: off\nmes" + full_space + kanji + "\n; hspfmt: on\nmes " + kanji + "\n", normalized);
+            expect("; hspfmt: ignore\n" + kanji + full_space + "=  1\n" + hiragana + "=2\n",
+                   "; hspfmt: ignore\n" + kanji + full_space + "=  1\n" + hiragana + " = 2\n", normalized);
+            expect(full_space + "; hspfmt: ignore\nmes" + full_space + kanji + "\nmes" + full_space + hiragana + "\n",
+                   " ; hspfmt: ignore\nmes" + full_space + kanji + "\nmes " + hiragana + "\n", normalized);
+            expect("; hspfmt: ignore\nmes" + full_space + "1,\\\n" + full_space + "2,\\\n" + full_space + "3\nmes" + full_space + kanji + "\n",
+                   "; hspfmt: ignore\nmes" + full_space + "1,\\\n" + full_space + "2,\\\n" + full_space + "3\nmes " + kanji + "\n", normalized);
             expect(full_space + " \t" + full_space + "; hspfmt: off\nmes" + full_space + kanji + "\n" + full_space + "; hspfmt: on\nmes" + full_space + kanji + "\n",
                    "  \t ; hspfmt: off\nmes" + full_space + kanji + "\n ; hspfmt: on\nmes " + kanji + "\n", normalized);
             diagnostic_cases("mes" + full_space + "1\nfoo" + full_space + "*bar\n",
@@ -192,6 +198,52 @@ int main() {
         expect("a = 1 + \\\n  2\n", "a = 1 + \\\n  2\n");
         expect("; hspfmt: off\ncustom_start\nx=1\ncustom_end\n; hspfmt: on\na=2\n",
                "; hspfmt: off\ncustom_start\nx=1\ncustom_end\n; hspfmt: on\na = 2\n");
+        expect("; hspfmt: ignore\n\t a    = 1  \nx=2\n",
+               "; hspfmt: ignore\n\t a    = 1  \nx = 2\n");
+        expect("\xef\xbb\xbf; hspfmt: ignore\r\n a   =1\r\nx=2",
+               "\xef\xbb\xbf; hspfmt: ignore\r\n a   =1\r\nx = 2");
+        expect("; hspfmt: ignore\na   =1", "; hspfmt: ignore\na   =1");
+        expect("; hspfmt: ignore", "; hspfmt: ignore");
+        expect("; hspfmt: ignore\n  \nx=1\n", "; hspfmt: ignore\n  \nx = 1\n");
+        expect("; hspfmt: ignore\n  ; kept\nx=1\n", "; hspfmt: ignore\n  ; kept\nx = 1\n");
+        expect("; hspfmt: ignore\n; hspfmt: ignore\nx=1\ny=2\n",
+               "; hspfmt: ignore\n; hspfmt: ignore\nx=1\ny = 2\n");
+        expect("; hspfmt: off\n; hspfmt: ignore\nx=1\ny=2\n; hspfmt: on\nz=3\n",
+               "; hspfmt: off\n; hspfmt: ignore\nx=1\ny=2\n; hspfmt: on\nz = 3\n");
+        expect("mes \"; hspfmt: ignore\"\na=1 ; hspfmt: ignore\nb=2\n"
+               "// hspfmt: ignore\nc=3\n/* hspfmt: ignore */\nd=4\n",
+               "mes \"; hspfmt: ignore\"\na = 1 ; hspfmt: ignore\nb = 2\n"
+               "// hspfmt: ignore\nc = 3\n/* hspfmt: ignore */\nd = 4\n");
+        expect("; hspfmt: ignore\n repeat  2\nx=1\n; hspfmt: ignore\n  loop\ny=2\n",
+               "; hspfmt: ignore\n repeat  2\n    x = 1\n; hspfmt: ignore\n  loop\ny = 2\n");
+        expect("; hspfmt: ignore\n if a {\nx=1\n; hspfmt: ignore\n  }\ny=2\n",
+               "; hspfmt: ignore\n if a {\n    x = 1\n; hspfmt: ignore\n  }\ny = 2\n");
+        expect("; hspfmt: ignore\ns={\"\n; hspfmt: ignore\n\"}\nx=1\n",
+               "; hspfmt: ignore\ns={\"\n; hspfmt: ignore\n\"}\nx = 1\n");
+        diagnostic_cases("; hspfmt: ignore\nfoo*bar\nx=1\n",
+                         "; hspfmt: ignore\nfoo*bar\nx = 1\n", {});
+        hspfmt::Options ignored_options;
+        ignored_options.comment_style = hspfmt::CommentStyle::C;
+        ignored_options.block_comments = hspfmt::BlockComments::Lines;
+        ignored_options.operator_style = hspfmt::OperatorStyle::C;
+        ignored_options.increment_style = hspfmt::OperatorStyle::C;
+        ignored_options.condition_parens = hspfmt::Parentheses::Add;
+        ignored_options.repeat_parens = hspfmt::Parentheses::Add;
+        ignored_options.hsp_numeric_prefixes = true;
+        ignored_options.short_if = true;
+        ignored_options.blank_lines_before_module = 2;
+        expect("; hspfmt: ignore\nif a=0x1 { x+ } ; kept\n"
+               "; hspfmt: ignore\nrepeat 2\nx+\nloop\n"
+               "; hspfmt: ignore\n/* kept\n block */\n"
+               "; hspfmt: ignore\n#module m\n#global\nx=0x1 ; changed\n",
+               "; hspfmt: ignore\nif a=0x1 { x+ } ; kept\n"
+               "; hspfmt: ignore\nrepeat 2\n    x++\nloop\n"
+               "; hspfmt: ignore\n/* kept\n block */\n"
+               "; hspfmt: ignore\n#module m\n#global\nx = $1 // changed\n", ignored_options);
+        ignored_options.block_comments = hspfmt::BlockComments::Block;
+        expect("; before\n; hspfmt: ignore\n; kept\n; after\n",
+               "/* before*/\n; hspfmt: ignore\n; kept\n/* after*/\n", ignored_options);
+        rejects("; hspfmt: ignore\nrepeat\n");
         hspfmt::Options options;
         options.hsp_numeric_prefixes = true;
         expect("a=0x00Ff:b=0b0010:s=\"0xff\"\n", "a = $00Ff : b = %0010 : s = \"0xff\"\n", options);

@@ -93,21 +93,22 @@ struct SourceLine {
 std::vector<SourceLine> source_lines(std::string_view source, const std::vector<Token> &tokens) {
     std::vector<SourceLine> lines;
     std::size_t begin = 0, first = 0;
-    bool disabled = false, continuation = false;
+    bool disabled = false, continuation = false, ignored = false;
     auto append = [&](std::size_t end, std::size_t last, std::string_view newline) {
         auto start = first;
         while (start < last && (tokens[start].kind == Kind::Space || tokens[start].kind == Kind::Bom)) ++start;
         while (last > start && tokens[last - 1].kind == Kind::Space) --last;
         const auto text = [&](std::size_t i) { return source.substr(tokens[i].begin, tokens[i].end - tokens[i].begin); };
         const bool marker = start + 1 == last && tokens[start].kind == Kind::Comment &&
-            one_of(text(start), {"; hspfmt: off", "; hspfmt: on"});
+            one_of(text(start), {"; hspfmt: off", "; hspfmt: on", "; hspfmt: ignore"});
         const bool next = start < last && text(last - 1) == "\\";
         bool multiline = false;
         for (auto i = start; i < last; ++i)
             if (text(i).find_first_of("\r\n") != std::string_view::npos) multiline = true;
-        lines.push_back({begin, end, start, last, newline, disabled || continuation || next || marker,
+        lines.push_back({begin, end, start, last, newline, disabled || ignored || continuation || next || marker,
                          start < last && text(start) == "#", multiline});
-        if (marker) disabled = text(start) == "; hspfmt: off";
+        if (marker && text(start) != "; hspfmt: ignore") disabled = text(start) == "; hspfmt: off";
+        ignored = (marker && text(start) == "; hspfmt: ignore") || (ignored && next);
         continuation = next;
     };
     for (std::size_t i = 0; i < tokens.size(); ++i) {
@@ -126,7 +127,7 @@ std::string normalize_full_width_spaces(std::string_view source, Encoding encodi
     const std::string_view full_space = encoding == Encoding::Utf8 ? "\xe3\x80\x80" : "\x81\x40";
     std::string out;
     std::size_t copied = 0;
-    bool disabled = false;
+    bool disabled = false, ignored = false;
     for (const auto &line : lines) {
         auto first = line.first;
         // Recognize standalone markers even when their indentation uses U+3000.
@@ -144,10 +145,15 @@ std::string normalize_full_width_spaces(std::string_view source, Encoding encodi
         if (first + 1 == line.last && tokens[first].kind == Kind::Comment) {
             const auto &token = tokens[first];
             const auto text = source.substr(token.begin, token.end - token.begin);
-            marker = one_of(text, {"; hspfmt: off", "; hspfmt: on"});
-            if (marker) next_disabled = text == "; hspfmt: off";
+            marker = one_of(text, {"; hspfmt: off", "; hspfmt: on", "; hspfmt: ignore"});
+            if (marker && text != "; hspfmt: ignore") next_disabled = text == "; hspfmt: off";
         }
-        const bool preserve = disabled && !marker;
+        const bool preserve = (disabled || ignored) && !marker;
+        const bool ignore_marker = marker && source.substr(tokens[first].begin,
+            tokens[first].end - tokens[first].begin) == "; hspfmt: ignore";
+        const bool next = line.first < line.last && source.substr(tokens[line.last - 1].begin,
+            tokens[line.last - 1].end - tokens[line.last - 1].begin) == "\\";
+        ignored = ignore_marker || (ignored && next);
         disabled = next_disabled;
         if (preserve) continue;
         for (auto t = line.first; t < line.last; ++t) {
@@ -788,17 +794,21 @@ std::string format(std::string_view source, const Options &options,
     bool continuation = false;
     std::string gap;
     std::size_t line_number = 1;
-    bool disabled = false;
+    bool disabled = false, ignored = false;
     auto flush = [&](std::size_t end, std::string_view newline, std::size_t next_token) {
         const std::string_view raw = source.substr(begin, end - begin);
-        bool preserve = protected_line || continuation || disabled;
+        bool preserve = protected_line || continuation || disabled || ignored;
         const bool next_continuation = !items.empty() && items.back().text == "\\";
         if (next_continuation) preserve = true;
         const bool was_disabled = disabled;
+        const bool was_ignored = ignored;
+        ignored = false;
         if (items.size() == 1 && items[0].kind == Kind::Comment) {
             if (items[0].text == "; hspfmt: off") { disabled = true; preserve = true; }
             if (items[0].text == "; hspfmt: on") { disabled = false; preserve = true; }
+            if (items[0].text == "; hspfmt: ignore") { ignored = true; preserve = true; }
         }
+        ignored = ignored || (was_ignored && next_continuation);
         const bool opaque = continuation || next_continuation || was_disabled || disabled;
         const bool label = items.size() >= 2 && items[0].text == "*" && items[1].kind == Kind::Word;
         if (!opaque && !items.empty() && items[0].text == "#") {
