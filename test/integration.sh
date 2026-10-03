@@ -133,7 +133,39 @@ expect_error --write "$test_dir/symlink.hsp"
 test -L "$test_dir/symlink.hsp"
 ln "$test_dir/roundtrip.hsp" "$test_dir/hardlink.hsp"
 expect_error --write "$test_dir/hardlink.hsp"
-cmp "$repo/test/behavior.hsp" "$test_dir/roundtrip.hsp"
+expect_error "$test_dir/roundtrip.hsp" "$test_dir/write.hsp"
+expect_error --write - "$test_dir/roundtrip.hsp"
+expect_error --stdin-filepath=custom.hsp "$test_dir/roundtrip.hsp"
+expect_error --config=nonexistent.cfg "$test_dir/roundtrip.hsp"
+
+# Test --stdin-filepath with stdin
+printf 'foo*bar\n' | "$formatter" --stdin-filepath=virtual/path.hsp - > "$test_dir/stdin-path.out" 2> "$test_dir/stdin-path.stderr"
+printf 'virtual/path.hsp:1: warning: ambiguous label or multiplication; preserving whitespace\nfoo*bar\n' > "$test_dir/stdin-path.expected-stderr"
+cmp "$test_dir/stdin-path.expected-stderr" "$test_dir/stdin-path.stderr"
+
+# Test multiple files with --check and --write
+cp "$test_dir/roundtrip.hsp" "$test_dir/multi1.hsp"
+cp "$test_dir/roundtrip.hsp" "$test_dir/multi2.hsp"
+if "$formatter" --check "$test_dir/multi1.hsp" "$test_dir/multi2.hsp"; then
+    echo 'expected --check to report unformatted multi-files' >&2
+    exit 1
+else
+    test "$?" -eq 1
+fi
+"$formatter" --write "$test_dir/multi1.hsp" "$test_dir/multi2.hsp"
+"$formatter" --check "$test_dir/multi1.hsp" "$test_dir/multi2.hsp"
+cmp "$test_dir/default.hsp" "$test_dir/multi1.hsp"
+cmp "$test_dir/default.hsp" "$test_dir/multi2.hsp"
+
+# Test config file loading
+printf 'indent=2\ntabs\n' > "$test_dir/test.cfg"
+printf 'repeat\nx=1\nloop\n' | "$formatter" --config="$test_dir/test.cfg" - > "$test_dir/config.out"
+printf 'repeat\n\tx = 1\nloop\n' > "$test_dir/config.expected"
+cmp "$test_dir/config.expected" "$test_dir/config.out"
+printf 'repeat\nx=1\nloop\n' | "$formatter" --config="$test_dir/test.cfg" --no-config - > "$test_dir/no-config.out"
+printf 'repeat\n    x = 1\nloop\n' > "$test_dir/no-config.expected"
+cmp "$test_dir/no-config.expected" "$test_dir/no-config.out"
+
 test -z "$(find "$test_dir" -name '.hspfmt-*' -print)"
 
 if "$formatter" --check "$repo/test/behavior.hsp"; then

@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.16)
 project(hspfmt LANGUAGES CXX)
 
+if(MSVC)
+    add_compile_options(/W4)
+else()
+    add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
 add_library(hspfmt_lib hspfmt.cpp)
 target_compile_features(hspfmt_lib PUBLIC cxx_std_17)
 target_include_directories(hspfmt_lib PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
