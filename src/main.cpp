@@ -132,10 +132,13 @@ void load_config(const fs::path &path, hspfmt::Options &options) {
             throw std::runtime_error(path.string() + ":" + std::to_string(line_num) +
                                      ": invalid or unsupported config option: " + opt);
     }
+    if (file.bad() || (file.fail() && !file.eof()))
+        throw std::runtime_error("config read failed: " + path.string());
 }
 }
 
 int main(int argc, char **argv) {
+    std::string input_name;
     try {
         hspfmt::Options options;
         bool check = false;
@@ -181,6 +184,8 @@ int main(int argc, char **argv) {
                 no_config = true;
             } else if (arg.rfind("--config=", 0) == 0) {
                 config_path = arg.substr(9);
+                if (config_path.empty())
+                    throw std::runtime_error("--config requires a non-empty file path");
             }
         }
 
@@ -237,6 +242,9 @@ int main(int argc, char **argv) {
 
         bool has_diff = false;
         for (const auto &filename : filenames) {
+            input_name = filename == "-"
+                ? (!stdin_filepath.empty() ? stdin_filepath : "<stdin>")
+                : filename;
             if (write && (!fs::is_regular_file(fs::symlink_status(filename)) || fs::hard_link_count(filename) != 1))
                 throw std::runtime_error("--write requires a regular file without symbolic or hard links");
 
@@ -244,7 +252,7 @@ int main(int argc, char **argv) {
             std::istream *input = &std::cin;
             if (filename != "-") {
                 file.open(filename, std::ios::binary);
-                if (!file) throw std::runtime_error("cannot open " + filename);
+                if (!file) throw std::runtime_error("cannot open input file");
                 input = &file;
             }
             const std::string source{std::istreambuf_iterator<char>(*input), {}};
@@ -257,11 +265,8 @@ int main(int argc, char **argv) {
             } else {
                 std::vector<hspfmt::Diagnostic> diagnostics;
                 output = hspfmt::format(source, options, &diagnostics);
-                const std::string display_name = (filename == "-")
-                    ? (!stdin_filepath.empty() ? stdin_filepath : "<stdin>")
-                    : filename;
                 for (const auto &diagnostic : diagnostics) {
-                    std::cerr << display_name
+                    std::cerr << input_name
                               << ':' << diagnostic.line
                               << ": warning: ambiguous label or multiplication; preserving whitespace\n"
                               << diagnostic.source << '\n';
@@ -280,7 +285,9 @@ int main(int argc, char **argv) {
         if (check) return has_diff ? 1 : 0;
         return 0;
     } catch (const std::exception &error) {
-        std::cerr << "hspfmt: " << error.what() << '\n';
+        std::cerr << "hspfmt: ";
+        if (!input_name.empty()) std::cerr << input_name << ": ";
+        std::cerr << error.what() << '\n';
         return 2;
     }
 }
