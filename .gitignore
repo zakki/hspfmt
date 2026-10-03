@@ -40,3 +40,5 @@ hsptmp
 *.swp
 *.swo
 *~
+/target/
+Cargo.lock

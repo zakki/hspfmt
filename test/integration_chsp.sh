@@ -2,7 +2,7 @@
 # Optional Linux integration test; independent of the regular build and CTest.
 set -eu
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-formatter=${1:-"$repo/build/hspfmt"}
+formatter=${1:-"cargo run --bin hspfmt --"}
 case "$formatter" in
     /*) ;;
     *) formatter="$(pwd)/$formatter" ;;
