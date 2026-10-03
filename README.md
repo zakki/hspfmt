@@ -88,7 +88,7 @@ build/hspfmt --config=.hspfmt.example script.hsp
 | `--blank-lines-before-module=N` | モジュール宣言手前の空行数（0〜16、または維持） | 維持 |
 | `--blank-lines-before-deffunc=N` | `#deffunc` 宣言手前の空行数（0〜16、または維持） | 維持 |
 | `--blank-lines-before-defcfunc=N` | `#defcfunc` 宣言手前の空行数（0〜16、または維持） | 維持 |
-| `--encoding=utf8\|cp932` | 入力文字エンコーディングの検証・文字境界処理 | `utf8` |
+| `--encoding=auto\|utf8\|cp932` | 入力文字エンコーディングの検証・文字境界処理（自動判定／UTF-8／CP932） | `auto` |
 | `--full-width-spaces=preserve\|normalize` | 全角スペース（U+3000）を維持／半角スペースへ正規化 | `preserve` |
 | `--roundtrip` | 字句解析した全トークンを無変更で連結して出力（デバッグ用） | 無効 |
 

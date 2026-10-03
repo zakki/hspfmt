@@ -20,15 +20,13 @@ int main(int argc, char **argv) {
             const std::string input{std::istreambuf_iterator<char>(file), {}};
             hspfmt::Options options;
             std::vector<hspfmt::Token> original;
-            try { original = hspfmt::lex(input, options.encoding); }
-            catch (const std::runtime_error &) {
-                options.encoding = hspfmt::Encoding::Cp932;
-                try { original = hspfmt::lex(input, options.encoding); }
-                catch (const std::runtime_error &e) {
-                    ++rejected;
-                    std::cerr << entry.path() << ": " << e.what() << '\n';
-                    continue;
-                }
+            try {
+                options.encoding = hspfmt::detect_encoding(input);
+                original = hspfmt::lex(input, options.encoding);
+            } catch (const std::runtime_error &e) {
+                ++rejected;
+                std::cerr << entry.path() << ": " << e.what() << '\n';
+                continue;
             }
             ++files;
             std::string restored;

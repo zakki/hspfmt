@@ -28,8 +28,112 @@ bool one_of(std::string_view s, std::initializer_list<std::string_view> values) 
     throw Error(message, line);
 }
 
+bool check_utf8(std::string_view s, std::size_t &invalid_pos, std::size_t &first_non_ascii) {
+    first_non_ascii = std::string_view::npos;
+    for (std::size_t i = 0; i < s.size(); ) {
+        const auto c = static_cast<unsigned char>(s[i]);
+        if (c < 128) {
+            ++i;
+            continue;
+        }
+        if (first_non_ascii == std::string_view::npos) first_non_ascii = i;
+        const unsigned count = c >= 0xc2 && c <= 0xdf ? 2 :
+                               c >= 0xe0 && c <= 0xef ? 3 :
+                               c >= 0xf0 && c <= 0xf4 ? 4 : 0;
+        if (!count || i + count > s.size()) {
+            invalid_pos = i;
+            return false;
+        }
+        for (unsigned j = 1; j < count; ++j) {
+            const auto b = static_cast<unsigned char>(s[i + j]);
+            if (b < 0x80 || b > 0xbf) {
+                invalid_pos = i + j;
+                return false;
+            }
+        }
+        const auto second = static_cast<unsigned char>(s[i + 1]);
+        if ((c == 0xe0 && second < 0xa0) || (c == 0xed && second >= 0xa0) ||
+            (c == 0xf0 && second < 0x90) || (c == 0xf4 && second >= 0x90)) {
+            invalid_pos = i;
+            return false;
+        }
+        i += count;
+    }
+    return true;
+}
+
+bool check_cp932(std::string_view s, std::size_t &invalid_pos, std::size_t &first_non_ascii) {
+    first_non_ascii = std::string_view::npos;
+    for (std::size_t i = 0; i < s.size(); ) {
+        const auto c = static_cast<unsigned char>(s[i]);
+        if (c < 128) {
+            ++i;
+            continue;
+        }
+        if (first_non_ascii == std::string_view::npos) first_non_ascii = i;
+        if (c >= 0xa1 && c <= 0xdf) {
+            ++i;
+            continue;
+        }
+        if ((c >= 0x81 && c <= 0x9f) || (c >= 0xe0 && c <= 0xfc)) {
+            if (i + 1 < s.size()) {
+                const auto next = static_cast<unsigned char>(s[i + 1]);
+                if (next >= 0x40 && next <= 0xfc && next != 0x7f) {
+                    i += 2;
+                    continue;
+                }
+            }
+        }
+        invalid_pos = i;
+        return false;
+    }
+    return true;
+}
+
+} // namespace
+
+Encoding detect_encoding(std::string_view s) {
+    // 1. UTF-8 BOM
+    if (s.size() >= 3 &&
+        static_cast<unsigned char>(s[0]) == 0xef &&
+        static_cast<unsigned char>(s[1]) == 0xbb &&
+        static_cast<unsigned char>(s[2]) == 0xbf) {
+        std::size_t invalid_pos = 0, first_non_ascii = 0;
+        if (!check_utf8(s.substr(3), invalid_pos, first_non_ascii)) {
+            fail(s, 3 + invalid_pos, "invalid UTF-8 byte sequence after BOM");
+        }
+        return Encoding::Utf8;
+    }
+
+    std::size_t utf8_invalid = 0, utf8_first = std::string_view::npos;
+    const bool valid_utf8 = check_utf8(s, utf8_invalid, utf8_first);
+
+    // 2. ASCII: no non-ASCII bytes
+    if (utf8_first == std::string_view::npos) {
+        return Encoding::Utf8;
+    }
+
+    std::size_t cp932_invalid = 0, cp932_first = std::string_view::npos;
+    const bool valid_cp932 = check_cp932(s, cp932_invalid, cp932_first);
+
+    // 3. Exactly one encoding is valid
+    if (valid_utf8 && !valid_cp932) return Encoding::Utf8;
+    if (!valid_utf8 && valid_cp932) return Encoding::Cp932;
+
+    // 4. Undetermined (neither valid, or ambiguous between both)
+    if (!valid_utf8 && !valid_cp932) {
+        fail(s, std::min(utf8_invalid, cp932_invalid),
+             "cannot determine encoding: neither valid UTF-8 nor valid CP932; specify --encoding explicitly");
+    }
+    fail(s, utf8_first,
+         "cannot determine encoding: ambiguous between UTF-8 and CP932; specify --encoding explicitly");
+}
+
+namespace {
+
 // Validate boundaries so a CP932 trail byte (notably 0x5c) is never syntax.
 std::size_t character_end(std::string_view s, std::size_t i, Encoding encoding) {
+    if (encoding == Encoding::Auto) encoding = detect_encoding(s);
     const auto c = static_cast<unsigned char>(s[i]);
     if (c < 128) return i + 1;
     if (encoding == Encoding::Cp932) {
@@ -860,6 +964,7 @@ std::string short_if_lines(std::string_view source, const Options &options) {
 } // namespace
 
 std::vector<Token> lex(std::string_view s, Encoding encoding) {
+    if (encoding == Encoding::Auto) encoding = detect_encoding(s);
     std::vector<Token> tokens;
     std::size_t i = 0;
     while (i < s.size()) {
@@ -935,8 +1040,10 @@ std::vector<Token> lex(std::string_view s, Encoding encoding) {
     return tokens;
 }
 
-std::string format(std::string_view source, const Options &options,
+std::string format(std::string_view source, const Options &user_options,
                    std::vector<Diagnostic> *diagnostics) {
+    Options options = user_options;
+    if (options.encoding == Encoding::Auto) options.encoding = detect_encoding(source);
     if (options.indent_width > 16) throw std::runtime_error("indent width must be between 0 and 16");
     if (options.base_indent > 16) throw std::runtime_error("base indent must be between 0 and 16");
     if (options.loop_indent > 16) throw std::runtime_error("loop indent must be between 0 and 16");

@@ -130,8 +130,10 @@ bool parse_formatting_option(const std::string &arg, hspfmt::Options &options) {
     else if (arg.rfind("--blank-lines-before-module=", 0) == 0) options.blank_lines_before_module = blank_lines(arg.substr(28));
     else if (arg.rfind("--blank-lines-before-deffunc=", 0) == 0) options.blank_lines_before_deffunc = blank_lines(arg.substr(29));
     else if (arg.rfind("--blank-lines-before-defcfunc=", 0) == 0) options.blank_lines_before_defcfunc = blank_lines(arg.substr(30));
+    else if (arg == "--encoding=auto") options.encoding = hspfmt::Encoding::Auto;
     else if (arg == "--encoding=cp932") options.encoding = hspfmt::Encoding::Cp932;
     else if (arg == "--encoding=utf8") options.encoding = hspfmt::Encoding::Utf8;
+    else if (arg.rfind("--encoding=", 0) == 0) throw std::runtime_error("invalid encoding: " + arg.substr(11));
     else if (arg.rfind("--base-indent=", 0) == 0) options.base_indent = number(arg.substr(14));
     else if (arg.rfind("--loop-indent=", 0) == 0) options.loop_indent = number(arg.substr(14));
     else if (arg.rfind("--indent=", 0) == 0) {
@@ -213,7 +215,7 @@ int main(int argc, char **argv) {
                     "  --blank-lines-before-module=N|preserve (0..16)\n"
                     "  --blank-lines-before-deffunc=N|preserve (0..16)\n"
                     "  --blank-lines-before-defcfunc=N|preserve (0..16)\n"
-                    "  --encoding=utf8|cp932 (default: utf8; bytes are preserved)\n"
+                    "  --encoding=auto|utf8|cp932 (default: auto; bytes are preserved)\n"
                     "Exit 2 indicates an input, syntax, option, or output error.\n";
                 return 0;
             } else if (arg == "--no-config") {

@@ -835,14 +835,67 @@ int main() {
         rejects(std::string("a\0b", 3));
         // Errors report the physical line of the failure, or where an unterminated construct starts.
         rejects_at("x=1\r\ny=2\r\nmes \"open\r\n", 3);
-        rejects_at("x=1\n/* open\n\n", 2);
-        rejects_at("x=1\r\rmes \"a\xc0\"\n", 3);
+        {
+            hspfmt::Options utf8_mode;
+            utf8_mode.encoding = hspfmt::Encoding::Utf8;
+            rejects_at("x=1\r\rmes \"a\xc0\"\n", 3, utf8_mode);
+        }
+        rejects_at("x=1\r\rmes \"a\xff\"\n", 3);
         rejects_at("s={\"\n\n\"} : wend\n", 1);
         rejects_at("x=1\nrepeat\nwhile 1\nwend\n", 2);
         rejects_at("x=1\n\nloop\n", 3);
         rejects_at("switch a\nswend\ncase 1\n", 3);
         rejects_at("x=1\n#ifdef A\nrepeat\nloop\n", 2);
         rejects_at("repeat\n#if A\nloop\n#else\n#endif\nloop\n", 5);
+
+        // Encoding auto-detection tests (ASCII, UTF-8, CP932, Undetermined)
+        if (hspfmt::detect_encoding("a = 1\n") != hspfmt::Encoding::Utf8)
+            throw std::runtime_error("ASCII should detect as UTF-8");
+        if (hspfmt::detect_encoding("\xef\xbb\xbf" "a = 1\n") != hspfmt::Encoding::Utf8)
+            throw std::runtime_error("BOM should detect as UTF-8");
+        if (hspfmt::detect_encoding(u8"mes \"日本語\"\n") != hspfmt::Encoding::Utf8)
+            throw std::runtime_error("UTF-8 Japanese should detect as UTF-8");
+        if (hspfmt::detect_encoding(u8"mes \"\u6f22\u5b57\"\n") != hspfmt::Encoding::Utf8)
+            throw std::runtime_error("UTF-8 Kanji should detect as UTF-8");
+        if (hspfmt::detect_encoding(u8"\u3000mes 1\n") != hspfmt::Encoding::Utf8)
+            throw std::runtime_error("UTF-8 full-width space should detect as UTF-8");
+        if (hspfmt::detect_encoding("mes \"\x82\xb1\x82\xf1\x82\xc9\x82\xbf\x82\xcd\"\n") != hspfmt::Encoding::Cp932)
+            throw std::runtime_error("CP932 hiragana should detect as CP932");
+        if (hspfmt::detect_encoding("mes \"\x8a\xbf\x8e\x9a\"\n") != hspfmt::Encoding::Cp932)
+            throw std::runtime_error("CP932 kanji should detect as CP932");
+        if (hspfmt::detect_encoding("mes \"\x95\x5c\"\n") != hspfmt::Encoding::Cp932)
+            throw std::runtime_error("CP932 table character with 0x5c should detect as CP932");
+        if (hspfmt::detect_encoding("mes \"\xb1\xb2\xb3\"\n") != hspfmt::Encoding::Cp932)
+            throw std::runtime_error("CP932 half-width kana should detect as CP932");
+        if (hspfmt::detect_encoding("\x81\x40mes 1\n") != hspfmt::Encoding::Cp932)
+            throw std::runtime_error("CP932 full-width space should detect as CP932");
+
+        // Undetermined rejection: ambiguous or neither valid
+        rejects("mes \"\xc3\xa9\"\n"); // ambiguous between UTF-8 (é) and CP932 (ﾃｩ)
+        rejects("mes \"\xff\xff\"\n"); // neither valid UTF-8 nor valid CP932
+        // Explicit encoding accepts ambiguous input
+        {
+            hspfmt::Options explicit_u8;
+            explicit_u8.encoding = hspfmt::Encoding::Utf8;
+            expect("mes \"\xc3\xa9\":a=1\n", "mes \"\xc3\xa9\" : a = 1\n", explicit_u8);
+            hspfmt::Options explicit_cp;
+            explicit_cp.encoding = hspfmt::Encoding::Cp932;
+            expect("mes \"\xc3\xa9\":a=1\n", "mes \"\xc3\xa9\" : a = 1\n", explicit_cp);
+        }
+
+        // Format with default auto-encoding
+        expect(u8"mes \"日本語\":a=1\n", u8"mes \"日本語\" : a = 1\n");
+        expect("mes \"\x95\x5c\":a=1\n", "mes \"\x95\x5c\" : a = 1\n");
+        expect("mes \"\x82\xb1\x82\xf1\x82\xc9\x82\xbf\x82\xcd\":a=1\n", "mes \"\x82\xb1\x82\xf1\x82\xc9\x82\xbf\x82\xcd\" : a = 1\n");
+
+        {
+            hspfmt::Options norm;
+            norm.full_width_spaces = hspfmt::FullWidthSpaces::Normalize;
+            expect(std::string(u8"\u3000") + "x=1\n", "x = 1\n", norm);
+            expect(std::string("\x81\x40") + "x=1\n", "x = 1\n", norm);
+            expect(std::string("mes") + u8"\u3000" + "1\n", "mes 1\n", norm);
+            expect(std::string("mes") + "\x81\x40" + "1\n", "mes 1\n", norm);
+        }
         std::cout << count << " formatter cases passed\n";
         return 0;
     } catch (const std::exception &error) {

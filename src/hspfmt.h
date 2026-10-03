@@ -8,7 +8,7 @@
 
 namespace hspfmt {
 
-enum class Encoding { Utf8, Cp932 };
+enum class Encoding { Auto, Utf8, Cp932 };
 enum class Kind { Space, Newline, Word, Number, String, Comment, Symbol, Bom };
 enum class CommentStyle { Preserve, Semicolon, C };
 enum class BlockComments { Preserve, Lines, Block };
@@ -31,7 +31,7 @@ struct Diagnostic {
 };
 
 struct Options {
-    Encoding encoding = Encoding::Utf8;
+    Encoding encoding = Encoding::Auto;
     FullWidthSpaces full_width_spaces = FullWidthSpaces::Preserve;
     unsigned indent_width = 4;
     unsigned base_indent = 0;
@@ -72,8 +72,10 @@ private:
     std::size_t line_;
 };
 
+// Detect whether source is UTF-8 or CP932 (returns Encoding::Utf8 or Encoding::Cp932).
+Encoding detect_encoding(std::string_view source);
 // Invalid/unterminated input throws Error. No source is modified.
-std::vector<Token> lex(std::string_view source, Encoding encoding);
+std::vector<Token> lex(std::string_view source, Encoding encoding = Encoding::Auto);
 // Diagnostics are appended when requested; the library does not write to stderr.
 std::string format(std::string_view source, const Options &options = {},
                    std::vector<Diagnostic> *diagnostics = nullptr);
