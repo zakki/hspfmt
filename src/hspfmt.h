@@ -13,6 +13,7 @@ enum class CommentStyle { Preserve, Semicolon, C };
 enum class BlockComments { Preserve, Lines, Block };
 enum class Parentheses { Preserve, Add, Remove };
 enum class OperatorStyle { Preserve, Hsp, C };
+enum class FullWidthSpaces { Preserve, Normalize };
 
 // Every byte belongs to exactly one token, including trivia and the BOM.
 struct Token {
@@ -29,6 +30,7 @@ struct Diagnostic {
 
 struct Options {
     Encoding encoding = Encoding::Utf8;
+    FullWidthSpaces full_width_spaces = FullWidthSpaces::Preserve;
     unsigned indent_width = 4;
     bool tabs = false;
     bool binary_spaces = true;

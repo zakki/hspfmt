@@ -36,6 +36,79 @@ int main() {
     try {
         expect("", "");
         expect("a=1:b=2\n", "a = 1 : b = 2\n");
+        for (const auto encoding : {hspfmt::Encoding::Utf8, hspfmt::Encoding::Cp932}) {
+            hspfmt::Options japanese;
+            japanese.encoding = encoding;
+            // Kanji, hiragana, U+3000, and a CP932 character whose trail byte is 0x5c.
+            const std::string kanji = encoding == hspfmt::Encoding::Utf8
+                ? u8"\u6f22\u5b57" : "\x8a\xbf\x8e\x9a";
+            const std::string hiragana = encoding == hspfmt::Encoding::Utf8
+                ? u8"\u3072\u3089\u304c\u306a" : "\x82\xd0\x82\xe7\x82\xaa\x82\xc8";
+            const std::string table = encoding == hspfmt::Encoding::Utf8
+                ? u8"\u8868" : "\x95\x5c";
+            const std::string full_space = encoding == hspfmt::Encoding::Utf8
+                ? u8"\u3000" : "\x81\x40";
+            const std::string sum = encoding == hspfmt::Encoding::Utf8
+                ? u8"\u52a0\u7b97" : "\x89\xc1\x8e\x5a";
+            expect(kanji + "=2\n" + hiragana + "=3\n" + table + "=" + kanji + "+" + hiragana + "\n",
+                   kanji + " = 2\n" + hiragana + " = 3\n" + table + " = " + kanji + " + " + hiragana + "\n", japanese);
+            expect(kanji + "A1=" + hiragana + "2*3\n",
+                   kanji + "A1 = " + hiragana + "2 * 3\n", japanese);
+            expect("dim " + kanji + ",2\n" + kanji + "(0)=" + table + "\n" + kanji + ".1=" + hiragana + "\n",
+                   "dim " + kanji + ", 2\n" + kanji + "(0) = " + table + "\n" + kanji + ".1 = " + hiragana + "\n", japanese);
+            expect("*" + table + "\ngosub *" + table + "\n" + kanji + "=*" + table + "\n",
+                   "*" + table + "\ngosub *" + table + "\n" + kanji + " = *" + table + "\n", japanese);
+            expect(hiragana + "@" + kanji + " *" + table + "\n",
+                   hiragana + "@" + kanji + " *" + table + "\n", japanese);
+            // Preserve full-width spaces as identifier bytes, including leading/standalone ones.
+            expect(kanji + full_space + hiragana + "=1\n" + full_space + kanji + "=2\n" + full_space + "=3\n",
+                   kanji + full_space + hiragana + " = 1\n" + full_space + kanji + " = 2\n" + full_space + " = 3\n", japanese);
+            expect("mes" + full_space + kanji + "\n" + full_space + "mes 1\n",
+                   "mes" + full_space + kanji + "\n" + full_space + "mes 1\n", japanese);
+            expect("mes \"" + table + full_space + hiragana + "\" ; " + kanji + full_space + "\n",
+                   "mes \"" + table + full_space + hiragana + "\" ; " + kanji + full_space + "\n", japanese);
+            // Keep the ASCII uppercase trail byte in the CP932 function name intact.
+            expect("x=" + sum + "(" + kanji + "," + hiragana + ")\n",
+                   "x = " + sum + "(" + kanji + ", " + hiragana + ")\n", japanese);
+            japanese.operator_style = hspfmt::OperatorStyle::C;
+            japanese.increment_style = hspfmt::OperatorStyle::C;
+            japanese.binary_spaces = false;
+            expect("if " + kanji + "=" + hiragana + " : " + table + "+\n",
+                   "if " + kanji + "==" + hiragana + " : " + table + "++\n", japanese);
+            hspfmt::Options normalized;
+            normalized.encoding = encoding;
+            normalized.full_width_spaces = hspfmt::FullWidthSpaces::Normalize;
+            expect(full_space + "repeat" + full_space + "2\n" + full_space + kanji + full_space + "=" + full_space + hiragana + "+1\nloop\n",
+                   "repeat 2\n    " + kanji + " = " + hiragana + " + 1\nloop\n", normalized);
+            expect("mes" + full_space + full_space + kanji + full_space + "\n",
+                   "mes " + kanji + "\n", normalized);
+            expect("mes" + full_space + "\"" + table + full_space + "\" ; " + full_space + "\n" +
+                   "mes" + full_space + "'" + full_space + "' // " + full_space + "\n" +
+                   "a" + full_space + "=" + full_space + "1 /* " + full_space + " */\n",
+                   "mes \"" + table + full_space + "\" ; " + full_space + "\n" +
+                   "mes '" + full_space + "' // " + full_space + "\n" +
+                   "a = 1 /* " + full_space + " */\n", normalized);
+            expect("mes" + full_space + "{\"" + full_space + "\r\n" + table + full_space + "\"}\r\n" +
+                   full_space + "/* " + full_space + "\r\n" + full_space + " */\r\n",
+                   "mes {\"" + full_space + "\r\n" + table + full_space + "\"}\r\n" +
+                   " /* " + full_space + "\r\n" + full_space + " */\r\n", normalized);
+            expect("\xef\xbb\xbf" + full_space + kanji + "=1\r\nmes" + full_space + kanji,
+                   "\xef\xbb\xbf" + kanji + " = 1\r\nmes " + kanji, normalized);
+            expect("#const" + full_space + kanji + full_space + "1\nmes" + full_space + "1,\\\n" + full_space + "2\n",
+                   "#const " + kanji + " 1\nmes 1,\\\n 2\n", normalized);
+            expect("; hspfmt: off\nmes" + full_space + kanji + "\n; hspfmt: on\nmes" + full_space + kanji + "\n",
+                   "; hspfmt: off\nmes" + full_space + kanji + "\n; hspfmt: on\nmes " + kanji + "\n", normalized);
+            expect(full_space + " \t" + full_space + "; hspfmt: off\nmes" + full_space + kanji + "\n" + full_space + "; hspfmt: on\nmes" + full_space + kanji + "\n",
+                   "  \t ; hspfmt: off\nmes" + full_space + kanji + "\n ; hspfmt: on\nmes " + kanji + "\n", normalized);
+            diagnostic_cases("mes" + full_space + "1\nfoo" + full_space + "*bar\n",
+                             "mes 1\nfoo *bar\n", {{2, "foo" + full_space + "*bar"}}, normalized);
+            normalized.comment_style = hspfmt::CommentStyle::C;
+            normalized.block_comments = hspfmt::BlockComments::Lines;
+            expect("/* " + full_space + " */\nmes" + full_space + kanji + " ; " + full_space + "\n",
+                   "// " + full_space + " \nmes " + kanji + " // " + full_space + "\n", normalized);
+            if (encoding == hspfmt::Encoding::Cp932)
+                expect("a=\x83\x81@b\n", "a = \x83\x81@b\n", normalized);
+        }
         diagnostic_cases("foo *bar\n", "foo *bar\n", {{1, "foo *bar"}});
         diagnostic_cases("foo*bar\n", "foo*bar\n", {{1, "foo*bar"}});
         diagnostic_cases("foo * bar\n", "foo * bar\n", {});

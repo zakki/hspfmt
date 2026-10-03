@@ -84,6 +84,12 @@ bool parse_formatting_option(const std::string &arg, hspfmt::Options &options) {
     else if (arg == "--compact-operators") options.binary_spaces = false;
     else if (arg == "--hsp-prefixes") options.hsp_numeric_prefixes = true;
     else if (arg == "--short-if") options.short_if = true;
+    else if (arg.rfind("--full-width-spaces=", 0) == 0) {
+        const auto value = arg.substr(20);
+        if (value == "preserve") options.full_width_spaces = hspfmt::FullWidthSpaces::Preserve;
+        else if (value == "normalize") options.full_width_spaces = hspfmt::FullWidthSpaces::Normalize;
+        else throw std::runtime_error("invalid full-width space mode: " + value);
+    }
     else if (arg.rfind("--operator-style=", 0) == 0) options.operator_style = operator_style(arg.substr(17));
     else if (arg.rfind("--increment-style=", 0) == 0) options.increment_style = operator_style(arg.substr(18));
     else if (arg == "--indent-labels") options.indent_labels = true;
@@ -164,6 +170,7 @@ int main(int argc, char **argv) {
                     "  --stdin-filepath=PATH File path used in diagnostic messages for stdin\n"
                     "  --indent=N --tabs    Indentation (default: 4 spaces)\n"
                     "  --compact-operators Remove optional binary-operator spaces\n"
+                    "  --full-width-spaces=preserve|normalize (default: preserve)\n"
                     "  --hsp-prefixes       Convert 0x/0b to $/% (preserve digits)\n"
                     "  --operator-style=preserve|hsp|c (binary operator spelling)\n"
                     "  --increment-style=preserve|hsp|c (increment/decrement statements)\n"

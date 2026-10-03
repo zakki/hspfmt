@@ -59,6 +59,7 @@ Visual Studioなどの複数構成ジェネレータでは、実行ファイル�
 | `--line-width=N` | コロン形式へ変換する行幅の上限。既定100（インデント込みのバイト数） |
 | `--encoding=utf8` | UTF-8として検証・処理。既定値 |
 | `--encoding=cp932` | CP932（Shift_JIS）の文字境界として処理。符号化変換は行わない |
+| `--full-width-spaces=preserve\|normalize` | 全角スペース（U+3000）を維持／半角スペースへ正規化。既定は維持 |
 | `--roundtrip` | 字句解析した全トークンを無変更で連結して出力 |
 | `--indent-labels`, `--no-indent-labels` | ラベル以降の本文を1段下げる／下げない。既定は下げない |
 | `--comment-style=preserve\|semicolon\|c` | 行コメントの記号を維持／`;`／`//` に統一。既定は維持 |
@@ -68,6 +69,8 @@ Visual Studioなどの複数構成ジェネレータでは、実行ファイル�
 | `--blank-lines-before-module=N` | `#module` 手前の空行数を0〜16行に統一。省略時は維持 |
 | `--blank-lines-before-deffunc=N` | `#deffunc` 手前の空行数を0〜16行に統一。省略時は維持 |
 | `--blank-lines-before-defcfunc=N` | `#defcfunc` 手前の空行数を0〜16行に統一。省略時は維持 |
+
+`--full-width-spaces=normalize` は、指定した文字コードの全角スペースを、文字列リテラル・コメントの外で半角スペースへ置換してから整形します。プリプロセッサ行や行継続も対象ですが、`hspfmt: off` の領域と `--roundtrip` では維持します。コンパイラの設定には自動追従しません。全角スペースを識別子の一部として使うソースでは `preserve` を指定してください。
 
 `--short-if` は次の変換に対応します。
 

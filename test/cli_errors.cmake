@@ -40,6 +40,32 @@ set(input "${test_dir}/invalid.hsp")
 expect_error("hspfmt: virtual/path.hsp: unterminated block" --stdin-filepath=virtual/path.hsp -)
 expect_error("hspfmt: <stdin>: unterminated block" -)
 
+# Full-width space modes work in configs, with explicit CLI overrides.
+set(input "${test_dir}/full-space.hsp")
+set(full_space_source "mes　1\n")
+file(WRITE "${input}" "${full_space_source}")
+file(WRITE "${test_dir}/spaces.hspfmt" "full-width-spaces=normalize\n")
+execute_process(COMMAND "${FORMATTER}" --config=spaces.hspfmt full-space.hsp
+    WORKING_DIRECTORY "${test_dir}"
+    RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE diagnostic)
+if(NOT "${status}" STREQUAL "0" OR NOT "${output}" STREQUAL "mes 1\n" OR NOT "${diagnostic}" STREQUAL "")
+    message(FATAL_ERROR "full-width space config failed: ${status}: ${output}${diagnostic}")
+endif()
+foreach(mode preserve roundtrip)
+    if(mode STREQUAL "preserve")
+        set(option --full-width-spaces=preserve)
+    else()
+        set(option --roundtrip)
+    endif()
+    execute_process(COMMAND "${FORMATTER}" --config=spaces.hspfmt "${option}" full-space.hsp
+        WORKING_DIRECTORY "${test_dir}"
+        RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE diagnostic)
+    if(NOT "${status}" STREQUAL "0" OR NOT "${output}" STREQUAL "${full_space_source}" OR NOT "${diagnostic}" STREQUAL "")
+        message(FATAL_ERROR "${mode} changed full-width spaces: ${status}: ${output}${diagnostic}")
+    endif()
+endforeach()
+expect_error("invalid full-width space mode" --no-config --full-width-spaces=invalid full-space.hsp)
+
 # The automatically loaded .hspfmt must also reject read failures before writing.
 set(test_dir "${CMAKE_CURRENT_BINARY_DIR}/cli-errors/automatic")
 file(MAKE_DIRECTORY "${test_dir}/.hspfmt")

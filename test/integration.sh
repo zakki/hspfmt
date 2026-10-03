@@ -87,6 +87,26 @@ for mode in $modes; do
     cmp "$test_dir/$mode.hsp" "$test_dir/again.hsp"
 done
 
+# Keep Japanese source bytes intact in both encodings, with the matching input mode.
+for encoding in utf8 cp932; do
+    "$formatter" --no-config "--encoding=$encoding" --roundtrip "$repo/test/japanese-$encoding.hsp" \
+        > "$test_dir/japanese-$encoding-roundtrip.hsp"
+    cmp "$repo/test/japanese-$encoding.hsp" "$test_dir/japanese-$encoding-roundtrip.hsp"
+    for mode in default compact operators labels; do
+        case "$mode" in
+            default) set -- ;;
+            compact) set -- --compact-operators ;;
+            operators) set -- --operator-style=c --increment-style=c ;;
+            labels) set -- --indent-labels ;;
+        esac
+        "$formatter" --no-config "--encoding=$encoding" "$@" "$repo/test/japanese-$encoding.hsp" \
+            > "$test_dir/japanese-$encoding-$mode.hsp" 2> "$test_dir/japanese-$encoding-$mode.stderr"
+        "$formatter" --no-config "--encoding=$encoding" "$@" "$test_dir/japanese-$encoding-$mode.hsp" \
+            > "$test_dir/japanese-again.hsp" 2> "$test_dir/japanese-again.stderr"
+        cmp "$test_dir/japanese-$encoding-$mode.hsp" "$test_dir/japanese-again.hsp"
+    done
+done
+
 # In-place mode writes the same bytes as stdout mode and preserves permissions.
 cp "$test_dir/roundtrip.hsp" "$test_dir/write.hsp"
 chmod 640 "$test_dir/write.hsp"
@@ -188,6 +208,64 @@ for mode in roundtrip $modes; do
     "$hsp3cl" "$test_dir/$mode.ax" > "$test_dir/$mode.out"
     tail -n 1 "$test_dir/$mode.out" | grep -Fx 'hspfmt integration ok'
     cmp "$test_dir/roundtrip.out" "$test_dir/$mode.out"
+done
+
+for encoding in utf8 cp932; do
+    case "$encoding" in
+        utf8) set -- -i ;;
+        cp932) set -- ;;
+    esac
+    for mode in roundtrip default compact operators labels; do
+        "$hspcmp" "$@" -u "--compath=$hsp_common/" "-o$test_dir/japanese-$encoding-$mode.ax" \
+            "$test_dir/japanese-$encoding-$mode.hsp" > "$test_dir/japanese-$encoding-$mode.compile"
+        test -s "$test_dir/japanese-$encoding-$mode.ax"
+        "$hsp3cl" "$test_dir/japanese-$encoding-$mode.ax" > "$test_dir/japanese-$encoding-$mode.out"
+        tail -n 1 "$test_dir/japanese-$encoding-$mode.out" | grep -Fx 'japanese identifiers ok'
+        cmp "$test_dir/japanese-$encoding-roundtrip.out" "$test_dir/japanese-$encoding-$mode.out"
+    done
+done
+cmp "$test_dir/japanese-utf8-roundtrip.out" "$test_dir/japanese-cp932-roundtrip.out"
+
+# Preserve the local Linux compiler behavior; normalization makes U+3000 whitespace.
+printf 'mes 1\nend\n' > "$test_dir/full-space-baseline.hsp"
+"$hspcmp" -i -u "--compath=$hsp_common/" "-o$test_dir/full-space-baseline.ax" \
+    "$test_dir/full-space-baseline.hsp" > "$test_dir/full-space-baseline.compile"
+"$hsp3cl" "$test_dir/full-space-baseline.ax" > "$test_dir/full-space-baseline.out"
+for encoding in utf8 cp932; do
+    case "$encoding" in
+        utf8) set -- -i; full_space=$(printf '\343\200\200') ;;
+        cp932) set -- ; full_space=$(printf '\201\100') ;;
+    esac
+    for placement in indent separator; do
+        case "$placement" in
+            indent) printf '%smes 1\nend\n' "$full_space" ;;
+            separator) printf 'mes%s1\nend\n' "$full_space" ;;
+        esac > "$test_dir/full-space-$encoding-$placement-original.hsp"
+        "$formatter" --no-config "--encoding=$encoding" --full-width-spaces=preserve "$test_dir/full-space-$encoding-$placement-original.hsp" \
+            > "$test_dir/full-space-$encoding-$placement-formatted.hsp"
+        cmp "$test_dir/full-space-$encoding-$placement-original.hsp" "$test_dir/full-space-$encoding-$placement-formatted.hsp"
+        for mode in original formatted; do
+            if "$hspcmp" "$@" -u "--compath=$hsp_common/" "-o$test_dir/full-space-$encoding-$placement-$mode.ax" \
+                    "$test_dir/full-space-$encoding-$placement-$mode.hsp" \
+                    > "$test_dir/full-space-$encoding-$placement-$mode.compile"; then
+                echo 'expected full-width space used as whitespace to be rejected' >&2
+                exit 1
+            fi
+        done
+        "$formatter" --no-config "--encoding=$encoding" --full-width-spaces=normalize \
+            "$test_dir/full-space-$encoding-$placement-original.hsp" \
+            > "$test_dir/full-space-$encoding-$placement-normalized.hsp"
+        cmp "$test_dir/full-space-baseline.hsp" "$test_dir/full-space-$encoding-$placement-normalized.hsp"
+        "$formatter" --no-config "--encoding=$encoding" --full-width-spaces=normalize \
+            "$test_dir/full-space-$encoding-$placement-normalized.hsp" > "$test_dir/full-space-again.hsp"
+        cmp "$test_dir/full-space-$encoding-$placement-normalized.hsp" "$test_dir/full-space-again.hsp"
+        "$hspcmp" "$@" -u "--compath=$hsp_common/" "-o$test_dir/full-space-$encoding-$placement-normalized.ax" \
+            "$test_dir/full-space-$encoding-$placement-normalized.hsp" \
+            > "$test_dir/full-space-$encoding-$placement-normalized.compile"
+        "$hsp3cl" "$test_dir/full-space-$encoding-$placement-normalized.ax" \
+            > "$test_dir/full-space-$encoding-$placement-normalized.out"
+        cmp "$test_dir/full-space-baseline.out" "$test_dir/full-space-$encoding-$placement-normalized.out"
+    done
 done
 echo 'CLI checks and all compiler/runtime comparisons passed'
 # The caller can inspect the complete generated sources, bytecode, and outputs.

@@ -1,0 +1,37 @@
+; Encoding fixture: CP932. The CP932 fixture exercises the same source.
+漢字=2
+ひらがな=3
+表=漢字+ひらがな
+mes 表
+dim 配列,2
+配列(0)=表
+配列(1)=漢字*ひらがな
+mes 配列(0)
+mes 配列(1)
+; Linux OpenHSP accepts U+3000 inside identifiers, including at their start.
+変数　名=7
+mes 変数　名
+　先頭=8
+mes 　先頭
+　=9
+mes 　
+飛び先=*戻り
+gosub 飛び先
+呼び出し *戻り,表
+mes たす(漢字,ひらがな)
+mes "japanese identifiers ok"
+end
+
+*戻り
+mes "label ok"
+return
+
+#module 日本語
+#deffunc 呼び出し label p_飛び先, int p_値
+gosub p_飛び先
+mes p_値
+return
+
+#defcfunc たす int p_左, int p_右
+return p_左+p_右
+#global

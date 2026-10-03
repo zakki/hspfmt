@@ -118,6 +118,55 @@ std::vector<SourceLine> source_lines(std::string_view source, const std::vector<
     return lines;
 }
 
+std::string normalize_full_width_spaces(std::string_view source, Encoding encoding) {
+    const auto tokens = lex(source, encoding);
+    const auto lines = source_lines(source, tokens);
+    const std::string_view full_space = encoding == Encoding::Utf8 ? "\xe3\x80\x80" : "\x81\x40";
+    std::string out;
+    std::size_t copied = 0;
+    bool disabled = false;
+    for (const auto &line : lines) {
+        auto first = line.first;
+        // Recognize standalone markers even when their indentation uses U+3000.
+        while (first < line.last) {
+            if (tokens[first].kind == Kind::Space) { ++first; continue; }
+            if (tokens[first].kind != Kind::Word) break;
+            const auto &token = tokens[first];
+            auto text = source.substr(token.begin, token.end - token.begin);
+            while (text.substr(0, full_space.size()) == full_space) text.remove_prefix(full_space.size());
+            if (!text.empty()) break;
+            ++first;
+        }
+        bool marker = false;
+        bool next_disabled = disabled;
+        if (first + 1 == line.last && tokens[first].kind == Kind::Comment) {
+            const auto &token = tokens[first];
+            const auto text = source.substr(token.begin, token.end - token.begin);
+            marker = one_of(text, {"; hspfmt: off", "; hspfmt: on"});
+            if (marker) next_disabled = text == "; hspfmt: off";
+        }
+        const bool preserve = disabled && !marker;
+        disabled = next_disabled;
+        if (preserve) continue;
+        for (auto t = line.first; t < line.last; ++t) {
+            const auto &token = tokens[t];
+            // U+3000 outside strings/comments belongs to a Word in the lossless lexer.
+            if (token.kind != Kind::Word) continue;
+            out.append(source.substr(copied, token.begin - copied));
+            for (auto pos = token.begin; pos < token.end;) {
+                const auto end = character_end(source, pos, encoding);
+                const auto character = source.substr(pos, end - pos);
+                if (character == full_space) out += ' ';
+                else out.append(character);
+                pos = end;
+            }
+            copied = token.end;
+        }
+    }
+    out.append(source.substr(copied));
+    return out;
+}
+
 std::string rewrite_comments(std::string_view source, const Options &options) {
     if (options.comment_style == CommentStyle::Preserve && options.block_comments == BlockComments::Preserve)
         return std::string(source);
@@ -690,6 +739,11 @@ std::string format(std::string_view source, const Options &options,
             pos = end;
             if (pos < source.size() && source[pos++] == '\r' && pos < source.size() && source[pos] == '\n') ++pos;
         }
+    }
+    std::string normalized;
+    if (options.full_width_spaces == FullWidthSpaces::Normalize) {
+        normalized = normalize_full_width_spaces(source, options.encoding);
+        source = normalized;
     }
     std::string rewritten;
     if (options.comment_style != CommentStyle::Preserve || options.block_comments != BlockComments::Preserve) {
