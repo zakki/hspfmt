@@ -49,13 +49,13 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           cmake -E make_directory build/package
-          cmake -E copy build/Release/hspfmt.exe README.md LICENSE .hspfmt.example build/package/
+          cmake -E copy build/Release/hspfmt.exe README.md CONFIGURATION.md DESIGN.md LICENSE .hspfmt.example build/package/
           cmake -E copy_directory presets build/package/presets
 
       - name: Create Windows ZIP
         if: runner.os == 'Windows'
         working-directory: build/package
-        run: cmake -E tar cf ../hspfmt-windows-x64.zip --format=zip -- hspfmt.exe README.md LICENSE .hspfmt.example presets
+        run: cmake -E tar cf ../hspfmt-windows-x64.zip --format=zip -- hspfmt.exe README.md CONFIGURATION.md DESIGN.md LICENSE .hspfmt.example presets
 
       - name: Upload Windows ZIP
         if: runner.os == 'Windows'

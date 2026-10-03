@@ -1,260 +1,109 @@
 # hspfmt — HSP formatter
 
-HSPのマクロ展開前のソースコードを整形する、C++17製のCLIフォーマッタです。既定では整形結果を標準出力に出力し、`--write`（`-w`）指定時は入力ファイルを直接上書きします。
+HSP（Hot Soup Processor）およびcHSPのマクロ展開前のソースコードを整形する、C++17製の高速なCLIフォーマッタです。
+外部ツールやランタイムに依存せず、CRLF/LFの改行形式や文字エンコーディング（UTF-8/CP932）を正確に保持しながらソースコードを安全に整形します。
 
-## ビルドと実行
+## インストールとビルド
 
-CMake 3.16以上とC++17対応のコンパイラが必要です。
+### ソースコードからのビルド
+
+CMake 3.16以上とC++17対応コンパイラが必要です。
 
 ```sh
 cmake -S src -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
-build/hspfmt script.hsp
-build/hspfmt --check script.hsp
-build/hspfmt --short-if --hsp-prefixes script.hsp
-build/hspfmt --write script.hsp
 ```
 
-Visual Studioなどの複数構成ジェネレータでは、実行ファイルは `build/Release/hspfmt.exe` に生成されます。テスト用ツールのビルドを省く場合は、CMakeの構成時に `-DBUILD_TESTING=OFF` を指定します。
+Visual Studioなどの複数構成ジェネレータでは `build/Release/hspfmt.exe` に生成されます。テストツールのビルドを省く場合は `-DBUILD_TESTING=OFF` を指定してください。
 
-### GitHub ActionsとWindows用ZIP
+### Windows用バイナリ (ZIP)
 
-[CIワークフロー](.github/workflows/ci.yml) は、push・pull request・手動実行（`workflow_dispatch`）時にLinux（`ubuntu-latest`）とWindows（`windows-latest`）でReleaseビルド、CTest、`test/` のcorpus検証を実行します。OpenHSPを必要とする統合テストはCIの対象外です。
+GitHub Actionsの [CIワークフロー](.github/workflows/ci.yml) でビルドされたWindows 64bit用バイナリ（MSVC静的リンク版）をダウンロードできます。
 
-Windowsの検証が成功すると、64bit版の `hspfmt.exe`、`README.md`、`LICENSE`、`.hspfmt.example`、`presets/` を同梱した `hspfmt-windows-x64.zip` を生成します。MSVCランタイムは静的リンクされています。
+**Actions → CI → 対象のワークフロー実行 → Artifacts → hspfmt-windows-x64.zip**
 
-GitHubの **Actions → CI → 対象のワークフロー実行 → Artifacts** からZIPをダウンロードできます。展開後は `hspfmt.exe script.hsp` のように実行してください。Artifactsには保存期限があり、GitHub Releasesへの自動公開は行いません。
+ZIPには `hspfmt.exe`、`README.md`、`CONFIGURATION.md`、`DESIGN.md`、`LICENSE`、`.hspfmt.example`、および `presets/` が同梱されています。
+
+---
+
+## 使い方
+
+```sh
+# 標準出力へ整形結果を出力
+build/hspfmt script.hsp
+
+# ファイルを直接上書き更新
+build/hspfmt --write script.hsp
+
+# 整形差分の有無を検査（CI用）
+build/hspfmt --check script.hsp
+
+# 複数ファイルを一括更新
+build/hspfmt -w file1.hsp file2.hsp
+
+# 設定ファイルを指定して実行
+build/hspfmt --config=.hspfmt.example script.hsp
+```
 
 ### 入出力と終了コード
 
-ファイル名を省略するか `-` を指定すると標準入力を読み込みます。
-
-- **通常実行**: 成功時は0、入出力エラーや構文解析エラー時は2を返します。
-- **`--check`**: 整形差分がなければ0、差分があれば1、入出力・解析エラー時は2を返します。差分のあるファイルは `hspfmt: FILE: formatting differs` として標準エラー出力に表示します。
-- **`--write`, `-w`**: 整形成功後、同じディレクトリ配下の一時ファイルへ書き込み、クローズが完了した後にアトミックに元ファイルを置換します。差分がなければファイルに触れず、更新日時も維持します。標準出力には何も出力せず、成功時は0を返します。
+- ファイル名を省略するか `-` を指定すると標準入力から読み込みます。
+- **通常実行**: 成功時は `0`、入出力エラーや構文解析エラー時は `2` を返します。
+- **`--check`**: 整形差分がなければ `0`、差分があれば `1`、エラー時は `2` を返します。
+- **`--write`, `-w`**: 整形結果で元ファイルを直接置換します。差分がない場合はファイルに触れず、タイムスタンプを維持します。成功時は `0` を返します。
 
 > [!WARNING]
-> シェルによる上書きリダイレクト（例: `hspfmt script.hsp > script.hsp`）は、シェルが読み込み前に入力ファイルを空に切り詰めてしまうため絶対に行わないでください。ファイルの上書きには必ず `--write` を使用してください。
-
-`--write` または `--check` 指定時は、複数の入力ファイルを一括で指定できます（標準出力モードでの複数ファイル指定はできません）。`--write` はすべての入力を整形してから置換を始めるため、いずれかのファイルで読み込みや構文解析に失敗した場合はどのファイルも変更しません。置換自体が途中のファイルで失敗した場合は、それより前のファイルの置換は維持されます。
-
-字句・構文エラーは `hspfmt: FILE:LINE: メッセージ` の形式で表示します。行番号は入力の物理行で、閉じていない文字列・コメント・ブロックや、対応する `#endif` のない `#if` などは、それぞれの開始行を示します。`--write` はアクセス許可（パーミッション）を引き継ぎますが、POSIXの所有者や拡張属性などの保持は保証しません。標準入力、シンボリックリンク、複数のハードリンクがあるファイルは安全のため `--write` の対象外です。また、`--check` や `--roundtrip` とは併用できません。
-
-### 設定ファイル
-
-カレントディレクトリに `.hspfmt` が存在する場合、既定でその設定内容を読み込みます。`--config=FILE` で任意の設定ファイルパスを指定でき、`--no-config` で読み込みを無効化できます。
-
-設定ファイルは1行に1つのオプションを記述します（先頭の `--` は省略可能で、`#` や `;` で始まる行はコメント行として扱われます）。コマンドライン引数で渡されたオプションは、設定ファイルの内容を上書きします。なお、`--write` や `--check` などの実行モード指定は設定ファイル内には記述できません。
-
-配布サンプルに見られる流儀などに合わせ、空白や字下げのスタイルを定義した3種類のプリセットを用意しています。各ファイルを `.hspfmt` にコピーするか、`--config=FILE` で指定します。
-
-| プリセット | 通常コードの基本字下げ | ループごとの字下げ | コロン周辺 |
-| --- | --- | --- | --- |
-| [`.hspfmt.example`](.hspfmt.example)（HSPサンプル準拠） | タブ1段 | 増やさない | 1スペース |
-| [`presets/compact.hspfmt`](presets/compact.hspfmt) | タブ1段 | タブ1段 | 空白なし |
-| [`presets/structured.hspfmt`](presets/structured.hspfmt) | なし（ラベル本体はタブ1段） | タブ1段 | 1スペース |
-
-どのプリセットも演算子（`+=` などの複合代入を含む）・カンマ周辺の空白を除去し、コメント前は1スペースに統一します。いずれのプリセットも `preserve`（原文維持）は使わず、字下げや空白の規則を明示的に指定しています。括弧や演算子表記などの構文変換は各設定ファイルで調整できます。
-
-`.hspfmt.example` は演算子をHSP表記、増減文を `++`・`--` に統一し、`if`・`while` の式全体と `repeat` の引数全体を囲む括弧を除去します。
-
-```sh
-build/hspfmt --config=.hspfmt.example script.hsp
-build/hspfmt --config=presets/structured.hspfmt script.hsp
-```
-
-## 整形規則
-
-既定では4スペースでインデントし、二項演算子の左右、カンマの後、コロンの左右にスペースを入れます。既存の改行、コロンによる複文、識別子の大文字・小文字、リテラルの綴りを維持します。ラベルは行頭、関数本体は1段下げます。コメントの内容は再整形しません。
-
-`if` の波括弧、`repeat` と `foreach` の `loop`、標準マクロの `while/wend`、`for/next`、`do/until`、`switch/case/default/swend` を認識します。`#if` の各分岐は同じ入口の状態から解析し、分岐間で開いたブロックの深さや種類が異なる場合はエラーとして拒否します。
-
-| オプション | 動作 |
-| --- | --- |
-| `--write`, `-w` | 整形結果で入力ファイルを置換（複数ファイル指定可） |
-| `--check` | 整形差分の有無を検査（複数ファイル指定可） |
-| `--config=FILE` | 指定した設定ファイルを読み込む（既定: `.hspfmt`） |
-| `--no-config` | 設定ファイルの自動読み込みを無効化 |
-| `--stdin-filepath=PATH` | 標準入力時の診断メッセージに表示する仮想ファイル名 |
-| `--indent=N\|preserve` | インデント幅（0〜16、既定4）／元の字下げを維持 |
-| `--base-indent=N` | 通常コードの基本字下げ段数。関数・ラベル本体の字下げ段数との大きい方を採用（加算はしない）。0〜16、既定0 |
-| `--loop-indent=N` | `repeat`・`foreach`・`while`・`for`・`do` のループ1つにつき増やす字下げ段数。0〜16、既定1 |
-| `--tabs` | 1段につきタブ1文字でインデント |
-| `--compact-operators` | 二項演算子の前後の余分な空白を除去（トークン結合を防ぐ空白は保持） |
-| `--operator-spacing=preserve\|space\|compact` | 二項演算子の前後の空白を維持／1スペース／除去。既定は `space`。`compact` は `--compact-operators` と同じ |
-| `--comma-spacing=preserve\|space\|compact` | カンマ周辺の空白を維持／カンマ後に1スペース／除去。`space`・`compact` はカンマ前の空白も除去。既定は `space` |
-| `--colon-spacing=preserve\|space\|compact` | コロンの前後の空白を維持／1スペース／除去。既定は `space` |
-| `--comment-spacing=preserve\|space\|compact` | コードとコメントの間の空白を維持／1スペース／除去。既定は `space` |
-| `--hsp-prefixes` | 通常コードの `0x` を `$`、`0b` を `%` に統一（桁数・大文字/小文字・桁区切りは維持） |
-| `--operator-style=preserve\|hsp\|c` | 二項演算子の表記を維持／HSPスタイル／Cスタイルに統一。既定は維持 |
-| `--increment-style=preserve\|hsp\|c` | 増減文の表記を維持／`a+`・`a-`／`a++`・`a--` に統一。既定は維持 |
-| `--short-if` | 代入や命令呼び出しなど、通常の文からなる `if` ブロックをコロン形式に変換 |
-| `--line-width=N` | コロン形式へ変換する行幅の上限。既定100（インデント込みのバイト数） |
-| `--encoding=utf8` | UTF-8として検証・処理。既定値 |
-| `--encoding=cp932` | CP932（Shift_JIS）の文字境界として処理。符号化変換は行わない |
-| `--full-width-spaces=preserve\|normalize` | 全角スペース（U+3000）を維持／半角スペースへ正規化。既定は維持 |
-| `--roundtrip` | 字句解析した全トークンを無変更で連結して出力 |
-| `--indent-labels`, `--no-indent-labels` | ラベル以降の本文を1段下げる／下げない。既定は下げない |
-| `--comment-style=preserve\|semicolon\|c` | 行コメントの記号を維持／`;`／`//` に統一。既定は維持 |
-| `--block-comments=preserve\|lines\|block` | 独立したコメントのブロック形式を維持／行コメント化／ブロック化。既定は維持 |
-| `--condition-parens=preserve\|add\|remove` | `if`・`while` の式全体を囲む括弧を維持／追加／除去。既定は維持 |
-| `--repeat-parens=preserve\|add\|remove` | `repeat` の各引数を囲む括弧を維持／追加／除去。既定は維持 |
-| `--blank-lines-before-module=N` | `#module`・`#chsp_module` 手前の空行数を0〜16行に統一。省略時は維持 |
-| `--blank-lines-before-deffunc=N` | `#deffunc`・`#chsp_deffunc` 手前の空行数を0〜16行に統一。省略時は維持 |
-| `--blank-lines-before-defcfunc=N` | `#defcfunc`・`#chsp_defcfunc` 手前の空行数を0〜16行に統一。省略時は維持 |
-
-`--full-width-spaces=normalize` は、指定した文字コードの全角スペースを、文字列リテラル・コメントの外で半角スペースへ置換してから整形します。プリプロセッサ行や行継続も対象ですが、`hspfmt: off` の領域、`hspfmt: ignore` の対象行、`--roundtrip` では維持します。コンパイラの設定には自動追従しません。全角スペースを識別子の一部として使うソースでは `preserve` を指定してください。
-
-`--short-if` は次の変換に対応します。
-
-```hsp
-if (flag) { foo = bar : baz = 1 }
-```
-
-```hsp
-if flag : foo = bar : baz = 1
-```
-
-代入（配列要素を含む）・複合代入・増減文・`return`・通常の命令呼び出しを対象にします。ユーザー定義命令も名前解決をせずに扱います。`if z = 0 {`、本文の `return`、閉じ波括弧がそれぞれ別の行にある場合も、本文が1行なら `if z = 0 : return` に短縮します。短縮後は閉じ波括弧の行の改行を使い、末尾改行の有無を維持します。
-
-後続文、コメント、入れ子の `if`・`else`、ループ・`switch` とその構造を開閉する文、ラベル、プリプロセッサ行、行継続を含むブロックは変換対象外とします。`else` が次行に続く場合も変換せず、整形除外指定も維持します。本文が複数行のブロックや、長いコロン形式の複数行への展開は未対応です。`--condition-parens=remove`・`add` と併用でき、短縮後の条件式にも指定を適用します。なお、`--line-width` による行幅指定は本変換における上限値であり、コード全体の一般的な自動折り返しを行うものではありません。独自マクロが制御構造やラベルを生成する場合は、`hspfmt: off`・`ignore` で変換から除外してください。
-
-`--indent=preserve` は元の行頭のタブ・スペースを維持し、`--tabs` や `--indent-labels` による字下げの変更を行いません。構文とブロックの検査は行います。
-
-通常のインデント設定ではラベル自体は常に行頭に置きます。`--indent-labels` は次のラベルまたは関数・モジュール境界までの本文を1段下げます。関数本体の字下げと重複して加算されることはなく、ループなどの字下げは加算されます。`return` や `goto` では字下げを解除しません。
-
-関数・モジュール宣言やラベルの直前に連続する単独行コメントは、説明コメントとして宣言・ラベルと同じ字下げに揃えます。ラベルの説明コメントは `--indent-labels` や `--base-indent` の設定によらず行頭に置きます。空行で宣言・ラベルから離れたコメントは本文の字下げを使います。`--indent=preserve` では説明コメントの元の字下げを保持します。複数行コメントは先頭の字下げだけを揃え、コメント本文の空白は維持します。
-
-`--base-indent=1 --tabs` は通常コードをタブ1段から始めます。関数やラベル本体の1段の字下げと重複して加算されることはなく、ラベル自体とプリプロセッサ行は基本字下げの対象外です。`--loop-indent=0` はループ本体で字下げを増やしませんが、`if` の波括弧や `switch` の字下げ、ブロックの対応検査は行います。
-
-`--comment-style` は行末のコメントも対象にします。`--block-comments=lines` は単独行の `/* … */` を改行と本文を維持したまま行コメントに展開します。記号は `--comment-style=c` なら `//`、それ以外なら `;` です。`--block-comments=block` は連続した独立行の `;`・`//` コメントを1つのブロックコメントにまとめます。文の途中にあるブロックコメント、本文に `/*`・`*/` を含む行コメント、`hspfmt:` ディレクティブを含むコメントは安全のためブロック化しません。プリプロセッサ行、行継続、整形無効領域内のコメントは変更しません。
-
-括弧の除去は式全体を囲む外側の括弧のみが対象で、演算の優先順位を決める内部の括弧や関数呼び出しの括弧は保持します。`--repeat-parens` は、`repeat n, start` に対して `repeat (n), (start)` のように引数ごとに括弧を適用し、引数の省略は維持します。式の途中にブロックコメントがある場合や括弧の対応が不明な式は変換しません。`--short-if` と併用した場合は、コロン形式への変換後にも括弧の設定を適用します。
-
-空行数の調整は、宣言（`#module`, `#deffunc`, `#defcfunc` および対応するcHSP宣言）の手前にドキュメントコメントが連続している場合、そのコメント群の手前に適用されます。ファイル先頭には空行を追加しません。`=preserve` を指定すると元の空行数を維持します。追加される改行コードは直前の行の改行形式（CRLF / LF）に合わせます。
-
-```sh
-build/hspfmt --indent-labels --comment-style=semicolon --block-comments=lines \
-  --condition-parens=remove --repeat-parens=remove \
-  --blank-lines-before-module=2 --blank-lines-before-deffunc=1 \
-  --blank-lines-before-defcfunc=1 script.hsp
-```
-
-`--operator-style` は式中の `&`／`&&`、`|`／`||`、`!`／`!=`、`=`／`==` の表記を切り替えます。代入や複合代入の演算子は保持し、代入の右辺や配列添字の中にある比較演算子を変換します。例えば `--operator-style=c` では `x=a=b` を `x = a == b` に整形します。HSPの `&&` と `||` は `&` と `|` の別表記であり、Cスタイルにしてもビット演算のままで短絡評価にはならない点にご注意ください。`and`・`or` などのキーワードによる論理演算子は変換しません。
-
-`--increment-style` は文全体が変数または配列要素への増減文である場合に適用されます。式中の加減算、`a+2` のような旧来の加算代入構文、`+=`・`-=` は変換しません。HSPにおいて増減は文であり、`x=a++` や `++a` のような構文を修復する処理は行いません。
-
-命令と変数の名前解決は行わないため、未知の `foo (a)=b` のように「配列への代入」とも「命令引数の比較式」とも解釈できる曖昧な形式では、文頭の識別子に続く最初の演算子を保持します。文字列、コメント、プリプロセッサ行、行継続、整形無効領域内の演算子は変更しません。
-
-```sh
-build/hspfmt --operator-style=c --increment-style=c script.hsp
-build/hspfmt --operator-style=hsp --increment-style=hsp script.hsp
-```
-
-## cHSP構文
-
-cHSPの構文は拡張子や追加オプションによらず認識します。`.chsp` ファイルも通常のCLI操作で整形できます。
-
-```sh
-build/hspfmt --write native.chsp
-```
-
-`#chsp_module`〜`#chsp_module_end` と `#chsp_deffunc`・`#chsp_defcfunc`〜`#chsp_end` の対応を検査し、ネイティブ関数の本文を1段下げます。関数終了後は本文の字下げを解除します。関数内の `if`・ループなどには通常HSPと同じ整形規則を適用します。`target=c` と `target=plugin` の両方に対応し、同じファイル内の通常HSP関数も扱えます。
-
-```hsp
-#chsp_module "native" target=c
-#chsp_defcfunc sum array[int] values, int n, local[int] total -> int
-    total = 0
-    repeat n
-        total += values(cnt)
-    loop
-    return total
-#chsp_end
-#chsp_module_end
-```
-
-単一行の型付き宣言では `--comma-spacing` を適用します。`int`・`int64`・`double`・`str`・`label`、`array[型]`、`local[型]`、最大4次元の固定長ローカル配列（例: `local[int[2][3]]`）を認識します。戻り値の `-> 型`、型内の括弧、カンマ以外の宣言の空白は保持します。未知の型やマクロ依存の宣言は原文を保持し、コンパイラによる型や機能の対応可否は検査しません。
-
-行継続を使ったモジュール・関数宣言は原文を保持し、後続の関数本文は通常どおり字下げします。単一行の宣言直前にある説明コメントと空行数は、通常HSPの宣言と同じ規則で整形します。`#chsp_c {"…"}` の埋め込みCコードは文字列として内容を保持し、`#chsp_cdecl`・`#chsp_clink` の行も原文を保持します。
-
-## ソース保持と制約
-
-字句解析結果は元ソース上のバイト範囲として管理されます。空白、改行、コメント、BOMもすべてトークンとして保持します。文字列内のエスケープ文字を暗黙的に復元・再生成せず、CP932の2バイト目（`0x5C` 等）を演算子や引用符と誤認しないように読み込みます。CRLF/LFの改行形式や末尾改行の有無も完全に維持します。
-
-本ツールの構文解析は、文境界と標準ブロック構造を扱う小さな解析器です。完全な具象構文木（CST）の構築や型・名前解決は行いません。通常整形では、空白の変更によってトークン境界が変わっていないことを整形後の再字句解析によって厳密に検査します。ただし、これはマクロ展開後の意味の完全な同一性までを保証するものではありません。
-
-`foo *bar`、`foo@module *bar`、`foo@ *bar` は、ユーザー定義命令へのラベル引数と、変数への旧来の乗算代入のどちらにも解釈できます。この場合、本ツールは `*` の直前・直後の空白を原文のまま保持し、行内のほかの箇所のみを通常どおり整形します。そのうえで、空白の配置が指定した演算子の空白規則と異なる場合は、ファイル名・入力行番号・元の行を標準エラー出力に警告として表示します。`--operator-spacing=preserve` ではこの警告を出しません。診断出力は1行につき1回で、終了コードには影響しません。`--check` や `--write` でも表示され、`--roundtrip` では表示されません。C++ライブラリでは `format(source, options, &diagnostics)` のように引数を渡すことで、`Diagnostic` の配列として受け取ることができます。
-
-プリプロセッサ行、行継続（`\`）、複数行文字列、複数行コメントを含む行は原文のまま出力します。ただし、説明コメントの先頭の字下げと、単一行の標準的な `#deffunc`・`#defcfunc` 宣言のカンマ周辺は整形します。宣言のカンマには `--comma-spacing` を適用し、命令名の `local` 修飾や、引数の各型（`int`・`double`・`str`・`var`・`array`・`label`・`local`）と引数名が並ぶ標準的な形式に対応します。`prep`、未知の型、マクロによる引数リスト、行継続、引数間のコメントを含む形式は保持します。宣言のカンマ以外の空白と行末コメントは保持します。また、宣言前の空行数や独立したコメント形式の変更を明示した場合は、その指定を適用します。インクルードの解決やマクロ展開は行いません。標準構造マクロの再定義や、構文を動的に生成する独自マクロには未対応です。`--short-if` や括弧の変更オプションは、マクロが対象構文を変更しないソースコードで利用してください。
-
-手動で列を揃えた代入やデータ定義、独自構文などを整形から除外したい場合は、単独行のコメントで囲みます。この領域内ではブロック解析も一時停止するため、領域をまたいでブロックが開閉しないように記述してください。
-
-```hsp
-; hspfmt: off
-custom_begin
-    custom_body
-custom_end
-; hspfmt: on
-```
-
-1行だけ除外する場合は、直前に `; hspfmt: ignore` を単独行で記述します。
-
-```hsp
-; hspfmt: ignore
-values = 1,  10, 100
-```
-
-直後の1行を、インデントや末尾空白も含めて保持します。空行やコメント行も対象で、行継続や複数行トークンを含む場合はその行の終わりまで保持します。全角スペースの正規化、コメント形式や演算子などの変換、宣言前の空行数の指定も適用しません。`off/on` と違ってブロック解析は継続するため、除外行で `repeat` や `if` が始まっても後続行は通常どおりインデントします。文字列内や行末コメントの記述はディレクティブとして扱いません。
-
-`hspfmt: off`・`on`・`ignore` は、`; ` または `// ` に続けてこの綴りで書いた単独行コメントのみを認識します（例: `// hspfmt: off`）。両形式は混在でき、末尾の空白・タブも許容します。ブロックコメント（`/* hspfmt: off */`）や、記号直後の空白がないなど綴りが異なるものは通常のコメントとして扱います。コメント形式の変換オプションは、`hspfmt:` を含むコメントの記号を変更しません。
-
-HSPのコンパイラが許容する次の記述も、推測による修復を避けるため整形を拒否します。
-
-- 閉じ引用符のない文字列（コンパイラは行末で文字列を終了します）
-- `#endif` のない `#if`・`#ifdef`・`#ifndef`
-
-本ツールはすべての構文エラーを検出するコンパイラの代替ではありません。また、文法的に誤った構造を整形で推測修復することもありません。既存プロジェクトへ一括適用する前に、差分とコンパイル結果を必ず確認してください。
-
-## テスト
-
-```sh
-ctest --test-dir build -C Release --output-on-failure
-build/hspfmt_corpus test
-```
-
-C++単体テストは期待出力、トークンの完全再現、冪等性、文字コード、構文エラー時の拒否を検証します。既定の `BUILD_TESTING=ON` でビルドしてください。複数構成ジェネレータではcorpusツールも `build/Release/hspfmt_corpus.exe` を使用します。
-
-corpusツールは、指定した各ディレクトリ内の `.hsp`・`.as`・`.chsp` を再帰的に読み取り、整形拒否を報告しつつ、整形可能なソースにおける「冪等性」と「非空白トークンの完全一致」を検証します。不変条件違反がある場合は終了コード1、構文不正等による整形拒否のみであれば0を返します。文字コードはUTF-8を先に試し、失敗した場合はCP932で試行します。上記の例では、エラー確認用の `test/invalid.hsp` の整形拒否が報告されます。手持ちの任意のHSPプロジェクトも同様に検証できます。
-
-```sh
-build/hspfmt_corpus /path/to/hsp-project /path/to/OpenHSP/sample /path/to/OpenHSP/common
-```
-
-コンパイル・実行結果を比較する統合テストには、Linux環境の `sh`、GNU coreutils、OpenHSPの `hspcmp`、`hsp3cl`、および同環境の `common/` ディレクトリが別途必要です。
-
-```sh
-HSPCMP=/path/to/OpenHSP/hspcmp \
-HSP3CL=/path/to/OpenHSP/hsp3cl \
-HSP_COMMON=/path/to/OpenHSP/common \
-sh test/integration.sh
-```
-
-`hspcmp` と `hsp3cl` がPATH上にあれば、環境変数 `HSPCMP` と `HSP3CL` は省略可能です。`HSP_COMMON` は必須です。スクリプトの第1引数には、別のビルド先にあるhspfmt実行ファイルを指定できます（既定は `build/hspfmt`）。
-
-統合テストは原文と各オプションの整形結果、および複数のオプションを組み合わせた結果を実際にコンパイルし、実行出力が原文と完全に一致するかを比較検証します。生成物は表示された一時ディレクトリに残されます。整形規則の変更時は `test/test_hspfmt.cpp` に期待出力を追加し、実行時挙動の検証には `test/behavior.hsp` にテストケースを追加してください。
-
-cHSP用の追加統合テストは、`test/chsp.chsp` を `target=plugin`・`target=c` の両方でコンパイルし、原文と整形後の実行出力を期待値と比較します。Linux環境のcHSP対応コンパイラ、`hsp3cl`、Cコンパイラ、およびOpenHSPのヘッダが必要です。通常のビルド・CTestはこれらに依存しません。
-
-```sh
-CHSP=/path/to/OpenHSP/chsp \
-HSP3CL=/path/to/OpenHSP/hsp3cl \
-HSP_COMMON=/path/to/OpenHSP/common \
-CHSP_INCLUDE=/path/to/OpenHSP \
-sh test/integration_chsp.sh
-```
-
-`CHSP_INCLUDE` は `src/hsp3/hsp3struct.h` を含むOpenHSPのルートディレクトリです。Cコンパイラは `CC` で指定でき、既定は `cc` です。スクリプトの第1引数にはhspfmt実行ファイルを指定できます。生成物は表示された一時ディレクトリに残されます。
-
+> シェルの上書きリダイレクト（例: `hspfmt script.hsp > script.hsp`）は入力ファイルが空に切り詰められるため絶対に行わないでください。ファイルの上書きには必ず `--write` を使用してください。
+
+---
+
+## コマンドラインオプション
+
+| オプション | 動作 | 既定値 |
+| --- | --- | --- |
+| `--write`, `-w` | 整形結果で入力ファイルを置換（複数ファイル指定可） | 無効 |
+| `--check` | 整形差分の有無を検査（複数ファイル指定可） | 無効 |
+| `--config=FILE` | 指定した設定ファイルを読み込む | `.hspfmt` |
+| `--no-config` | 設定ファイルの自動読み込みを無効化 | 無効 |
+| `--stdin-filepath=PATH` | 標準入力時の診断メッセージに表示する仮想ファイル名 | 空 |
+| `--indent=N\|preserve` | インデント幅（0〜16）／元の字下げを維持 | `4` |
+| `--base-indent=N` | 通常コードの基本字下げ段数（0〜16） | `0` |
+| `--loop-indent=N` | ループ1つにつき増やす字下げ段数（0〜16） | `1` |
+| `--tabs` | 1段につきタブ1文字でインデント | 空白 |
+| `--indent-labels`, `--no-indent-labels` | ラベル以降の本文を1段下げる／下げない | 下げない |
+| `--operator-spacing=preserve\|space\|compact` | 二項演算子の前後の空白（維持／1スペース／除去） | `space` |
+| `--compact-operators` | 二項演算子の前後の余分な空白を除去（`--operator-spacing=compact` と同等） | 無効 |
+| `--comma-spacing=preserve\|space\|compact` | カンマ周辺の空白（維持／カンマ後に1スペース／除去） | `space` |
+| `--colon-spacing=preserve\|space\|compact` | コロンの前後の空白（維持／1スペース／除去） | `space` |
+| `--comment-spacing=preserve\|space\|compact` | コードとコメントの間の空白（維持／1スペース／除去） | `space` |
+| `--operator-style=preserve\|hsp\|c` | 二項演算子の表記（維持／HSPスタイル／Cスタイル） | `preserve` |
+| `--increment-style=preserve\|hsp\|c` | 増減文の表記（維持／`a+`・`a-`／`a++`・`a--`） | `preserve` |
+| `--hsp-prefixes` | 16進数/2進数の接頭辞をHSPスタイル（`$` / `%`）に統一 | 無効 |
+| `--short-if` | 単純な文からなる `if` ブロックをコロン形式に変換 | 無効 |
+| `--line-width=N` | コロン形式へ変換する行幅の上限バイト数 | `100` |
+| `--condition-parens=preserve\|add\|remove` | `if`・`while` の式全体を囲む括弧（維持／追加／除去） | `preserve` |
+| `--repeat-parens=preserve\|add\|remove` | `repeat` の各引数を囲む括弧（維持／追加／除去） | `preserve` |
+| `--comment-style=preserve\|semicolon\|c` | 行コメント記号（維持／`;`／`//`） | `preserve` |
+| `--block-comments=preserve\|lines\|block` | ブロックコメント形式（維持／行コメント化／ブロック化） | `preserve` |
+| `--blank-lines-before-module=N` | モジュール宣言手前の空行数（0〜16、または維持） | 維持 |
+| `--blank-lines-before-deffunc=N` | `#deffunc` 宣言手前の空行数（0〜16、または維持） | 維持 |
+| `--blank-lines-before-defcfunc=N` | `#defcfunc` 宣言手前の空行数（0〜16、または維持） | 維持 |
+| `--encoding=utf8\|cp932` | 入力文字エンコーディングの検証・文字境界処理 | `utf8` |
+| `--full-width-spaces=preserve\|normalize` | 全角スペース（U+3000）を維持／半角スペースへ正規化 | `preserve` |
+| `--roundtrip` | 字句解析した全トークンを無変更で連結して出力（デバッグ用） | 無効 |
+
+---
+
+## 関連ドキュメント
+
+各機能のより詳しい説明や設計については、以下のドキュメントを参照してください。
+
+- **[設定ガイド (CONFIGURATION.md)](CONFIGURATION.md)**
+  設定ファイル（`.hspfmt`）やプリセット（`.hspfmt.example`, `presets/`）の使い方、各整形オプションの設定前後の実例（Before / After）、cHSP構文の整形、および整形除外コメント（`; hspfmt: off` / `; hspfmt: ignore`）について詳しく解説しています。
+- **[設計思想と制約 (DESIGN.md)](DESIGN.md)**
+  アーキテクチャ設計、マクロ展開前の構文解析方針、ソース保持とトークン不変性の自己検証、HSP構文の曖昧性に対するアプローチ、`--write` のアトミック置換機構、およびテスト・品質保証戦略について解説しています。
+
+---
 
 ## ライセンス
 

@@ -4,6 +4,9 @@
 
 ## 構成
 
+- `README.md`: 概要、インストール・ビルド方法、CLIオプション一覧、ライセンス。
+- `CONFIGURATION.md`: 設定ファイル・プリセット・各オプションの詳細と実例（Before/After）。
+- `DESIGN.md`: 設計思想、構文解析と制約、安全性、テスト戦略。
 - `src/hspfmt.h`: 字句解析・整形APIとオプション。
 - `src/hspfmt.cpp`: 文字コードの検証、字句解析、ブロック解析、整形。
 - `src/main.cpp`: CLI、入出力、`--check`、`--write`。
