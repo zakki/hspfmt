@@ -39,7 +39,14 @@ expect_error("hspfmt: missing.hsp: cannot open input file" --check valid.hsp mis
 expect_error("numeric option too large: 99999999999999999999999" --no-config --indent=99999999999999999999999 valid.hsp)
 
 # Errors report the line where an unterminated construct starts or a mismatch occurs.
-file(WRITE "${test_dir}/late-string.hsp" "x = 1\r\ny = 2\r\nmes \"open\r\n")
+# file(WRITE) uses text mode on Windows: explicit CRLF would become CRCRLF.
+file(WRITE "${test_dir}/late-string.hsp.in" "x = 1\ny = 2\nmes \"open\n")
+configure_file("${test_dir}/late-string.hsp.in" "${test_dir}/late-string.hsp"
+    @ONLY NEWLINE_STYLE CRLF)
+file(READ "${test_dir}/late-string.hsp" late_string_hex HEX)
+if(NOT "${late_string_hex}" STREQUAL "78203d20310d0a79203d20320d0a6d657320226f70656e0d0a")
+    message(FATAL_ERROR "late-string.hsp must contain exactly three CRLF lines; got ${late_string_hex}")
+endif()
 file(WRITE "${test_dir}/late-block.hsp" "x = 1\nrepeat\nwhile 1\nwend\n")
 file(WRITE "${test_dir}/late-close.hsp" "x = 1\n\nloop\n")
 expect_error("hspfmt: late-string.hsp:3: newline in quoted string" --no-config late-string.hsp)
