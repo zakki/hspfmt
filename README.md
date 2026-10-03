@@ -88,7 +88,7 @@ build/hspfmt --config=presets/structured.hspfmt script.hsp
 | `--hsp-prefixes` | 通常コードの `0x` を `$`、`0b` を `%` に統一（桁数・大文字/小文字・桁区切りは維持） |
 | `--operator-style=preserve\|hsp\|c` | 二項演算子の表記を維持／HSPスタイル／Cスタイルに統一。既定は維持 |
 | `--increment-style=preserve\|hsp\|c` | 増減文の表記を維持／`a+`・`a-`／`a++`・`a--` に統一。既定は維持 |
-| `--short-if` | 独立した1行の代入のみで構成される `if` ブロックをコロン形式に変換 |
+| `--short-if` | 代入や命令呼び出しなど、通常の文からなる `if` ブロックをコロン形式に変換 |
 | `--line-width=N` | コロン形式へ変換する行幅の上限。既定100（インデント込みのバイト数） |
 | `--encoding=utf8` | UTF-8として検証・処理。既定値 |
 | `--encoding=cp932` | CP932（Shift_JIS）の文字境界として処理。符号化変換は行わない |
@@ -99,9 +99,9 @@ build/hspfmt --config=presets/structured.hspfmt script.hsp
 | `--block-comments=preserve\|lines\|block` | 独立したコメントのブロック形式を維持／行コメント化／ブロック化。既定は維持 |
 | `--condition-parens=preserve\|add\|remove` | `if`・`while` の式全体を囲む括弧を維持／追加／除去。既定は維持 |
 | `--repeat-parens=preserve\|add\|remove` | `repeat` の各引数を囲む括弧を維持／追加／除去。既定は維持 |
-| `--blank-lines-before-module=N` | `#module` 手前の空行数を0〜16行に統一。省略時は維持 |
-| `--blank-lines-before-deffunc=N` | `#deffunc` 手前の空行数を0〜16行に統一。省略時は維持 |
-| `--blank-lines-before-defcfunc=N` | `#defcfunc` 手前の空行数を0〜16行に統一。省略時は維持 |
+| `--blank-lines-before-module=N` | `#module`・`#chsp_module` 手前の空行数を0〜16行に統一。省略時は維持 |
+| `--blank-lines-before-deffunc=N` | `#deffunc`・`#chsp_deffunc` 手前の空行数を0〜16行に統一。省略時は維持 |
+| `--blank-lines-before-defcfunc=N` | `#defcfunc`・`#chsp_defcfunc` 手前の空行数を0〜16行に統一。省略時は維持 |
 
 `--full-width-spaces=normalize` は、指定した文字コードの全角スペースを、文字列リテラル・コメントの外で半角スペースへ置換してから整形します。プリプロセッサ行や行継続も対象ですが、`hspfmt: off` の領域、`hspfmt: ignore` の対象行、`--roundtrip` では維持します。コンパイラの設定には自動追従しません。全角スペースを識別子の一部として使うソースでは `preserve` を指定してください。
 
@@ -115,7 +115,9 @@ if (flag) { foo = bar : baz = 1 }
 if flag : foo = bar : baz = 1
 ```
 
-後続文、コメント、入れ子、`else`、配列要素への代入、命令呼び出しを含むブロックは安全のため変換対象外とします。`else` が次行に続く場合も変換しません。複数行のブロックを1行にまとめたり、長いコロン形式を複数行に展開したりする処理は未対応です。なお、`--line-width` による行幅指定は本変換における上限値であり、コード全体の一般的な自動折り返しを行うものではありません。
+代入（配列要素を含む）・複合代入・増減文・`return`・通常の命令呼び出しを対象にします。ユーザー定義命令も名前解決をせずに扱います。`if z = 0 {`、本文の `return`、閉じ波括弧がそれぞれ別の行にある場合も、本文が1行なら `if z = 0 : return` に短縮します。短縮後は閉じ波括弧の行の改行を使い、末尾改行の有無を維持します。
+
+後続文、コメント、入れ子の `if`・`else`、ループ・`switch` とその構造を開閉する文、ラベル、プリプロセッサ行、行継続を含むブロックは変換対象外とします。`else` が次行に続く場合も変換せず、整形除外指定も維持します。本文が複数行のブロックや、長いコロン形式の複数行への展開は未対応です。`--condition-parens=remove`・`add` と併用でき、短縮後の条件式にも指定を適用します。なお、`--line-width` による行幅指定は本変換における上限値であり、コード全体の一般的な自動折り返しを行うものではありません。独自マクロが制御構造やラベルを生成する場合は、`hspfmt: off`・`ignore` で変換から除外してください。
 
 `--indent=preserve` は元の行頭のタブ・スペースを維持し、`--tabs` や `--indent-labels` による字下げの変更を行いません。構文とブロックの検査は行います。
 
@@ -129,7 +131,7 @@ if flag : foo = bar : baz = 1
 
 括弧の除去は式全体を囲む外側の括弧のみが対象で、演算の優先順位を決める内部の括弧や関数呼び出しの括弧は保持します。`--repeat-parens` は、`repeat n, start` に対して `repeat (n), (start)` のように引数ごとに括弧を適用し、引数の省略は維持します。式の途中にブロックコメントがある場合や括弧の対応が不明な式は変換しません。`--short-if` と併用した場合は、コロン形式への変換後にも括弧の設定を適用します。
 
-空行数の調整は、宣言（`#module`, `#deffunc`, `#defcfunc`）の手前にドキュメントコメントが連続している場合、そのコメント群の手前に適用されます。ファイル先頭には空行を追加しません。`=preserve` を指定すると元の空行数を維持します。追加される改行コードは直前の行の改行形式（CRLF / LF）に合わせます。
+空行数の調整は、宣言（`#module`, `#deffunc`, `#defcfunc` および対応するcHSP宣言）の手前にドキュメントコメントが連続している場合、そのコメント群の手前に適用されます。ファイル先頭には空行を追加しません。`=preserve` を指定すると元の空行数を維持します。追加される改行コードは直前の行の改行形式（CRLF / LF）に合わせます。
 
 ```sh
 build/hspfmt --indent-labels --comment-style=semicolon --block-comments=lines \
@@ -148,6 +150,32 @@ build/hspfmt --indent-labels --comment-style=semicolon --block-comments=lines \
 build/hspfmt --operator-style=c --increment-style=c script.hsp
 build/hspfmt --operator-style=hsp --increment-style=hsp script.hsp
 ```
+
+## cHSP構文
+
+cHSPの構文は拡張子や追加オプションによらず認識します。`.chsp` ファイルも通常のCLI操作で整形できます。
+
+```sh
+build/hspfmt --write native.chsp
+```
+
+`#chsp_module`〜`#chsp_module_end` と `#chsp_deffunc`・`#chsp_defcfunc`〜`#chsp_end` の対応を検査し、ネイティブ関数の本文を1段下げます。関数終了後は本文の字下げを解除します。関数内の `if`・ループなどには通常HSPと同じ整形規則を適用します。`target=c` と `target=plugin` の両方に対応し、同じファイル内の通常HSP関数も扱えます。
+
+```hsp
+#chsp_module "native" target=c
+#chsp_defcfunc sum array[int] values, int n, local[int] total -> int
+    total = 0
+    repeat n
+        total += values(cnt)
+    loop
+    return total
+#chsp_end
+#chsp_module_end
+```
+
+単一行の型付き宣言では `--comma-spacing` を適用します。`int`・`int64`・`double`・`str`・`label`、`array[型]`、`local[型]`、最大4次元の固定長ローカル配列（例: `local[int[2][3]]`）を認識します。戻り値の `-> 型`、型内の括弧、カンマ以外の宣言の空白は保持します。未知の型やマクロ依存の宣言は原文を保持し、コンパイラによる型や機能の対応可否は検査しません。
+
+行継続を使ったモジュール・関数宣言は原文を保持し、後続の関数本文は通常どおり字下げします。単一行の宣言直前にある説明コメントと空行数は、通常HSPの宣言と同じ規則で整形します。`#chsp_c {"…"}` の埋め込みCコードは文字列として内容を保持し、`#chsp_cdecl`・`#chsp_clink` の行も原文を保持します。
 
 ## ソース保持と制約
 
@@ -196,7 +224,7 @@ build/hspfmt_corpus test
 
 C++単体テストは期待出力、トークンの完全再現、冪等性、文字コード、構文エラー時の拒否を検証します。既定の `BUILD_TESTING=ON` でビルドしてください。複数構成ジェネレータではcorpusツールも `build/Release/hspfmt_corpus.exe` を使用します。
 
-corpusツールは、指定した各ディレクトリ内の `.hsp` と `.as` を再帰的に読み取り、整形拒否を報告しつつ、整形可能なソースにおける「冪等性」と「非空白トークンの完全一致」を検証します。不変条件違反がある場合は終了コード1、構文不正等による整形拒否のみであれば0を返します。文字コードはUTF-8を先に試し、失敗した場合はCP932で試行します。上記の例では、エラー確認用の `test/invalid.hsp` の整形拒否が報告されます。手持ちの任意のHSPプロジェクトも同様に検証できます。
+corpusツールは、指定した各ディレクトリ内の `.hsp`・`.as`・`.chsp` を再帰的に読み取り、整形拒否を報告しつつ、整形可能なソースにおける「冪等性」と「非空白トークンの完全一致」を検証します。不変条件違反がある場合は終了コード1、構文不正等による整形拒否のみであれば0を返します。文字コードはUTF-8を先に試し、失敗した場合はCP932で試行します。上記の例では、エラー確認用の `test/invalid.hsp` の整形拒否が報告されます。手持ちの任意のHSPプロジェクトも同様に検証できます。
 
 ```sh
 build/hspfmt_corpus /path/to/hsp-project /path/to/OpenHSP/sample /path/to/OpenHSP/common
@@ -214,6 +242,18 @@ sh test/integration.sh
 `hspcmp` と `hsp3cl` がPATH上にあれば、環境変数 `HSPCMP` と `HSP3CL` は省略可能です。`HSP_COMMON` は必須です。スクリプトの第1引数には、別のビルド先にあるhspfmt実行ファイルを指定できます（既定は `build/hspfmt`）。
 
 統合テストは原文と各オプションの整形結果、および複数のオプションを組み合わせた結果を実際にコンパイルし、実行出力が原文と完全に一致するかを比較検証します。生成物は表示された一時ディレクトリに残されます。整形規則の変更時は `test/test_hspfmt.cpp` に期待出力を追加し、実行時挙動の検証には `test/behavior.hsp` にテストケースを追加してください。
+
+cHSP用の追加統合テストは、`test/chsp.chsp` を `target=plugin`・`target=c` の両方でコンパイルし、原文と整形後の実行出力を期待値と比較します。Linux環境のcHSP対応コンパイラ、`hsp3cl`、Cコンパイラ、およびOpenHSPのヘッダが必要です。通常のビルド・CTestはこれらに依存しません。
+
+```sh
+CHSP=/path/to/OpenHSP/chsp \
+HSP3CL=/path/to/OpenHSP/hsp3cl \
+HSP_COMMON=/path/to/OpenHSP/common \
+CHSP_INCLUDE=/path/to/OpenHSP \
+sh test/integration_chsp.sh
+```
+
+`CHSP_INCLUDE` は `src/hsp3/hsp3struct.h` を含むOpenHSPのルートディレクトリです。Cコンパイラは `CC` で指定でき、既定は `cc` です。スクリプトの第1引数にはhspfmt実行ファイルを指定できます。生成物は表示された一時ディレクトリに残されます。
 
 
 ## ライセンス

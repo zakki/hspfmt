@@ -90,6 +90,12 @@ struct State {
     std::vector<Frame> blocks;
     unsigned function = 0;
     unsigned label = 0;
+    std::size_t chsp_module = 0;
+    std::size_t chsp_function = 0;
+    bool same_structure(const State &other) const {
+        return blocks == other.blocks && bool(chsp_module) == bool(other.chsp_module) &&
+            bool(chsp_function) == bool(other.chsp_function);
+    }
     unsigned depth(const Options &options) const {
         unsigned n = std::max({options.base_indent, function, label});
         for (const auto &frame : blocks)
@@ -291,9 +297,9 @@ std::string declaration_layout(std::string_view source, const Options &options) 
         if (!line.directive && !label) continue;
         const auto directive = line.directive ? lower(source.substr(token.begin, token.end - token.begin)) : "";
         int count = -1;
-        if (directive == "module") count = options.blank_lines_before_module;
-        else if (directive == "deffunc") count = options.blank_lines_before_deffunc;
-        else if (directive == "defcfunc") count = options.blank_lines_before_defcfunc;
+        if (directive == "module" || directive == "chsp_module") count = options.blank_lines_before_module;
+        else if (directive == "deffunc" || directive == "chsp_deffunc") count = options.blank_lines_before_deffunc;
+        else if (directive == "defcfunc" || directive == "chsp_defcfunc") count = options.blank_lines_before_defcfunc;
         else if (!label && !one_of(directive, {"modfunc", "modcfunc", "modinit", "modterm"})) continue;
         std::size_t start = i;
         while (start > 0) {
@@ -332,24 +338,62 @@ std::string declaration_layout(std::string_view source, const Options &options) 
     return out;
 }
 
-// Only standard, single-line typed parameter lists are eligible. Preserve all
+std::size_t declaration_type_end(const std::vector<Item> &items, std::size_t pos, std::size_t end, bool chsp) {
+    const auto begin = pos;
+    if (pos == end || items[pos].kind != Kind::Word) return begin;
+    const auto type = lower(items[pos++].text);
+    if (!chsp)
+        return one_of(type, {"int", "double", "str", "var", "array", "label", "local"}) ? pos : begin;
+    if (one_of(type, {"int", "int64", "double", "str", "label"})) return pos;
+    if (!one_of(type, {"array", "local"}) || pos == end || items[pos++].text != "[") return begin;
+    if (pos == end || items[pos].kind != Kind::Word ||
+        !one_of(lower(items[pos++].text), {"int", "int64", "double", "str"})) return begin;
+    // Fixed local array extents may have up to four dimensions. Unknown sizes
+    // or type forms are left untouched rather than interpreted as expressions.
+    unsigned dimensions = 0;
+    while (type == "local" && pos < end && items[pos].text == "[") {
+        if (++dimensions > 4 || pos + 2 >= end || items[pos + 1].kind != Kind::Number ||
+            items[pos + 1].text.empty() || items[pos + 1].text.find_first_not_of("0123456789") != std::string::npos ||
+            items[pos + 2].text != "]") return begin;
+        pos += 3;
+    }
+    if (pos == end || items[pos].text != "]") return begin;
+    return pos + 1;
+}
+
+// Only recognized, single-line typed parameter lists are eligible. Preserve all
 // gaps except those adjacent to commas, including directive/comment spacing.
 std::string declaration_commas(std::string_view raw, const std::vector<Item> &items, const Options &options) {
-    if (options.comma_spacing == Spacing::Preserve || items.size() < 3 ||
-        !one_of(lower(items[1].text), {"deffunc", "defcfunc"})) return std::string(raw);
+    if (options.comma_spacing == Spacing::Preserve || items.size() < 3) return std::string(raw);
+    const auto directive = lower(items[1].text);
+    const bool chsp = one_of(directive, {"chsp_deffunc", "chsp_defcfunc"});
+    if (!chsp && !one_of(directive, {"deffunc", "defcfunc"})) return std::string(raw);
     auto last = items.size();
     if (items.back().kind == Kind::Comment) --last;
     std::size_t pos = 2;
-    if (pos < last && lower(items[pos].text) == "local") ++pos;
+    if (!chsp && pos < last && lower(items[pos].text) == "local") ++pos;
     if (pos == last || items[pos].kind != Kind::Word || lower(items[pos].text) == "prep") return std::string(raw);
     ++pos;
+    const auto arrow = [&](std::size_t i) {
+        return chsp && i + 1 < last && items[i].text == "-" && items[i + 1].text == ">";
+    };
     while (pos < last) {
-        if (pos + 1 >= last || items[pos].kind != Kind::Word ||
-            !one_of(lower(items[pos].text), {"int", "double", "str", "var", "array", "label", "local"}) ||
-            items[pos + 1].kind != Kind::Word) return std::string(raw);
-        pos += 2;
-        if (pos == last) break;
-        if (items[pos].text != "," || ++pos == last) return std::string(raw);
+        if (arrow(pos)) break;
+        const auto name = declaration_type_end(items, pos, last, chsp);
+        if (name == pos || name == last || items[name].kind != Kind::Word) return std::string(raw);
+        pos = name + 1;
+        if (pos == last || arrow(pos)) break;
+        if (items[pos].text != ",") return std::string(raw);
+        ++pos;
+        if (pos == last || arrow(pos)) return std::string(raw);
+    }
+    if (chsp) {
+        if (arrow(pos)) {
+            if (pos + 3 != last || items[pos + 2].kind != Kind::Word) return std::string(raw);
+            const auto result = lower(items[pos + 2].text);
+            if (directive == "chsp_defcfunc" ? !one_of(result, {"int", "int64", "double", "str"}) :
+                result != "void") return std::string(raw);
+        } else if (directive == "chsp_defcfunc") return std::string(raw);
     }
     std::string out;
     std::size_t consumed = 0;
@@ -712,10 +756,21 @@ std::string print_items(const std::vector<Item> &items, const Options &options,
     return out;
 }
 
-// Only a complete, isolated one-line if with assignment statements is eligible.
+bool followed_by_else(std::string_view source, const std::vector<Token> &tokens, std::size_t next) {
+    for (; next < tokens.size(); ++next) {
+        const auto &token = tokens[next];
+        if (token.kind == Kind::Space || token.kind == Kind::Newline ||
+            token.kind == Kind::Comment || token.kind == Kind::Bom) continue;
+        return token.kind == Kind::Word && lower(source.substr(token.begin, token.end - token.begin)) == "else";
+    }
+    return false;
+}
+
+// Ordinary statements are eligible without resolving command/variable names.
+// The same check is used when joining a single body line below.
 // No nested control flow, trailing statements, comments, or directive rewriting.
 std::vector<Item> short_if(std::vector<Item> items, const Options &options, std::size_t indent_size) {
-    if (!options.short_if || items.size() < 7 || lower(items[0].text) != "if") return items;
+    if (!options.short_if || items.size() < 5 || lower(items[0].text) != "if") return items;
     for (const auto &item : items) if (item.kind == Kind::Comment) return items;
     if (items.back().text != "}") return items;
     std::size_t open = 1;
@@ -728,7 +783,12 @@ std::vector<Item> short_if(std::vector<Item> items, const Options &options, std:
         if (items[i].text == "{") return items;
         if (items[i].text == ":" || items[i].text == "}") {
             if (items[i].text == "}" && i != items.size() - 1) return items;
-            if (i < start + 3 || items[start].kind != Kind::Word || items[start + 1].text != "=") return items;
+            if (i == start || items[start].kind != Kind::Word) return items;
+            // Structural statements can change which instructions a colon-form
+            // condition guards, or expand into labels/blocks in standard macros.
+            if (one_of(lower(items[start].text), {"if", "else", "repeat", "foreach", "loop", "while", "wend",
+                                                "for", "next", "do", "until", "switch", "case", "default",
+                                                "swbreak", "swend"})) return items;
             start = i + 1;
         }
     }
@@ -750,6 +810,51 @@ std::vector<Item> short_if(std::vector<Item> items, const Options &options, std:
     }
     if (print_items(operator_spelling(expression_parens(result, options), options), options).size() + indent_size > options.line_width) return items;
     return result;
+}
+
+// Join exactly one ordinary body line. Work on formatted output so diagnostics
+// and structural validation continue to refer to the original physical lines.
+std::string short_if_lines(std::string_view source, const Options &options) {
+    if (!options.short_if) return std::string(source);
+    const auto tokens = lex(source, options.encoding);
+    const auto lines = source_lines(source, tokens);
+    const auto text = [&](std::size_t t) { return source.substr(tokens[t].begin, tokens[t].end - tokens[t].begin); };
+    std::string out;
+    std::size_t copied = 0;
+    for (std::size_t i = 0; i + 2 < lines.size(); ++i) {
+        const auto &head = lines[i];
+        const auto &body = lines[i + 1];
+        const auto &close = lines[i + 2];
+        if (head.opaque || body.opaque || close.opaque || head.multiline || body.multiline || close.multiline ||
+            head.directive || body.directive || close.directive || head.first == head.last || body.first == body.last ||
+            close.first + 1 != close.last || lower(text(head.first)) != "if" ||
+            text(head.last - 1) != "{" || text(close.first) != "}" ||
+            followed_by_else(source, tokens, close.last)) continue;
+        std::vector<Item> items;
+        for (auto j = i; j <= i + 2; ++j) {
+            auto previous = tokens[lines[j].first].begin;
+            for (auto t = lines[j].first; t < lines[j].last; ++t) {
+                const auto &token = tokens[t];
+                if (token.kind == Kind::Space) continue;
+                auto gap = t == lines[j].first ? std::string(j == i ? "" : " ") :
+                    std::string(source.substr(previous, token.begin - previous));
+                items.push_back({token.kind, std::string(text(t)), std::move(gap)});
+                previous = token.end;
+            }
+        }
+        const auto prefix = source.substr(head.begin, tokens[head.first].begin - head.begin);
+        const auto indent_size = prefix.size() - (prefix.substr(0, 3) == "\xef\xbb\xbf" ? 3 : 0);
+        auto shortened = short_if(items, options, indent_size);
+        if (shortened.size() == items.size()) continue;
+        out.append(source.substr(copied, head.begin - copied));
+        out.append(prefix);
+        out += print_items(operator_spelling(expression_parens(shortened, options), options), options);
+        out.append(close.newline);
+        copied = close.end + close.newline.size();
+        i += 2;
+    }
+    out.append(source.substr(copied));
+    return out;
 }
 
 } // namespace
@@ -859,17 +964,6 @@ std::string format(std::string_view source, const Options &options,
         source = rewritten;
     }
     const auto tokens = lex(source, options.encoding);
-    // An else on the following line must keep its matching if in brace form.
-    const auto followed_by_else = [&](std::size_t next) {
-        for (; next < tokens.size(); ++next) {
-            const auto &token = tokens[next];
-            if (token.kind == Kind::Space || token.kind == Kind::Newline ||
-                token.kind == Kind::Comment || token.kind == Kind::Bom) continue;
-            return token.kind == Kind::Word &&
-                lower(source.substr(token.begin, token.end - token.begin)) == "else";
-        }
-        return false;
-    };
     State state;
     std::vector<Conditional> conditionals;
     std::vector<Item> items;
@@ -898,16 +992,20 @@ std::string format(std::string_view source, const Options &options,
         ignored = ignored || (was_ignored && next_continuation);
         const bool opaque = continuation || next_continuation || was_disabled || disabled;
         const bool label = items.size() >= 2 && items[0].text == "*" && items[1].kind == Kind::Word;
-        if (!opaque && !items.empty() && items[0].text == "#") {
+        const auto directive = items.size() > 1 && items[0].text == "#" ? lower(items[1].text) : "";
+        // A continued cHSP signature stays byte-for-byte intact, but its first
+        // line still starts the function/module scope used by subsequent code.
+        const bool continued_chsp = next_continuation && !continuation && !was_disabled && !disabled &&
+            one_of(directive, {"chsp_module", "chsp_deffunc", "chsp_defcfunc"});
+        if ((!opaque || continued_chsp) && !items.empty() && items[0].text == "#") {
             preserve = true;
-            const std::string directive = items.size() > 1 ? lower(items[1].text) : "";
             if (one_of(directive, {"if", "ifdef", "ifndef"})) {
                 conditionals.push_back({state, {}, false, false, line_start});
             } else if (directive == "else" || directive == "elif") {
                 if (conditionals.empty()) throw std::runtime_error("unmatched preprocessor branch");
                 auto &c = conditionals.back();
                 if (c.has_else) throw std::runtime_error("branch after #else");
-                if (c.has_branch && c.branch.blocks != state.blocks) throw std::runtime_error("conditional branches have different block structure");
+                if (c.has_branch && !c.branch.same_structure(state)) throw std::runtime_error("conditional branches have different block structure");
                 if (c.has_branch) state.function = std::max(state.function, c.branch.function);
                 if (c.has_branch) state.label = std::max(state.label, c.branch.label);
                 c.branch = state;
@@ -918,17 +1016,39 @@ std::string format(std::string_view source, const Options &options,
                 if (conditionals.empty()) throw std::runtime_error("unmatched #endif");
                 const auto c = conditionals.back();
                 conditionals.pop_back();
-                if ((c.has_branch && c.branch.blocks != state.blocks) || (!c.has_else && c.before.blocks != state.blocks))
+                if ((c.has_branch && !c.branch.same_structure(state)) || (!c.has_else && !c.before.same_structure(state)))
                     throw std::runtime_error("conditional branches have different block structure");
                 if (c.has_branch) state.function = std::max(state.function, c.branch.function);
                 if (!c.has_else) state.function = std::max(state.function, c.before.function);
                 if (c.has_branch) state.label = std::max(state.label, c.branch.label);
                 if (!c.has_else) state.label = std::max(state.label, c.before.label);
+            } else if (directive == "chsp_module") {
+                if (!state.blocks.empty() || state.chsp_module) throw std::runtime_error("nested cHSP module or module inside open block");
+                state.chsp_module = line_start;
+                state.function = state.label = 0;
+            } else if (one_of(directive, {"chsp_deffunc", "chsp_defcfunc"})) {
+                if (!state.chsp_module) throw std::runtime_error("cHSP function outside #chsp_module");
+                if (!state.blocks.empty() || state.chsp_function) throw std::runtime_error("cHSP function inside open block or function");
+                state.chsp_function = line_start;
+                state.function = 1;
+                state.label = 0;
+            } else if (directive == "chsp_end") {
+                if (!state.chsp_function) throw std::runtime_error("unmatched #chsp_end");
+                if (!state.blocks.empty()) throw std::runtime_error("#chsp_end inside open block");
+                state.chsp_function = 0;
+                state.function = state.label = 0;
+            } else if (directive == "chsp_module_end") {
+                if (!state.chsp_module) throw std::runtime_error("unmatched #chsp_module_end");
+                if (!state.blocks.empty() || state.chsp_function) throw std::runtime_error("#chsp_module_end inside open block or function");
+                state.chsp_module = 0;
+                state.function = state.label = 0;
             } else if (one_of(directive, {"deffunc", "defcfunc", "modfunc", "modcfunc", "modinit", "modterm"})) {
+                if (state.chsp_function) throw std::runtime_error("HSP function inside cHSP function");
                 if (!state.blocks.empty()) throw std::runtime_error("function declaration inside open block");
                 state.function = 1;
                 state.label = 0;
             } else if (directive == "global" || directive == "module") {
+                if (state.chsp_function) throw std::runtime_error("HSP module boundary inside cHSP function");
                 if (!state.blocks.empty()) throw std::runtime_error("module boundary inside open block");
                 state.function = 0;
                 state.label = 0;
@@ -946,7 +1066,7 @@ std::string format(std::string_view source, const Options &options,
             const auto indent_size = options.preserve_indent ? indentation.size() :
                 options.tabs ? depth : depth * options.indent_width;
             const bool following_else = options.short_if && !items.empty() &&
-                lower(items[0].text) == "if" && followed_by_else(next_token);
+                lower(items[0].text) == "if" && followed_by_else(source, tokens, next_token);
             auto printed = following_else ? items : short_if(items, options, indent_size);
             printed = expression_parens(printed, options);
             printed = operator_spelling(std::move(printed), options);
@@ -1004,7 +1124,9 @@ std::string format(std::string_view source, const Options &options,
         throw Error("unterminated preprocessor conditional", conditionals.back().line);
     if (!state.blocks.empty())
         throw Error("unterminated block, expected " + state.blocks.back().close, state.blocks.back().line);
-    return declaration_layout(out, options);
+    if (state.chsp_function) throw Error("unterminated cHSP function, expected #chsp_end", state.chsp_function);
+    if (state.chsp_module) throw Error("unterminated cHSP module, expected #chsp_module_end", state.chsp_module);
+    return declaration_layout(short_if_lines(out, options), options);
 }
 
 } // namespace hspfmt

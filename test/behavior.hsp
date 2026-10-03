@@ -124,8 +124,39 @@ repeat  1
 mes str(probe_row(0))+","+str(probe_row(1))+","+str(probe_row(2))
 ; hspfmt: ignore
   loop
+short_uy=2
+short_e=0
+if short_e=0 { short_uy-- }
+short_e=1
+if short_e=0 { short_uy-- }
+short_return_count=0
+short_z=0
+gosub *short_return
+short_z=1
+gosub *short_return
+mes "short-if="+str(short_uy)+","+str(short_return_count)
+dim short_items,2
+short_e=0
+if short_e=0 { short_items(0)=4 }
+if short_e=0 { fmt_short_set short_items,2 }
+short_e=1
+if short_e=0 { short_items(0)=9:fmt_short_set short_items,9 }
+if short_e=1 {
+fmt_short_set short_items,3
+}
+if short_e=0 {
+mes "unexpected short command"
+}
+if short_e=1 { mes "short-calls="+str(short_items(0))+","+str(short_items(1)) }
 mes "hspfmt integration ok"
 end
+
+*short_return
+if short_z=0 {
+return
+}
+short_return_count++
+return
 
 ; report label documentation
 ; second documentation line
@@ -160,6 +191,10 @@ return
 gosub p_first
 gosub p_last
 return p_factor
+
+#deffunc fmt_short_set array p_items,int p_value
+p_items(1)=p_value
+return
 
 #deffunc local fmt_local_labels label p_first, int p_factor, label p_last
 gosub p_first

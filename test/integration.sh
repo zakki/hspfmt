@@ -60,7 +60,7 @@ printf '%s:1: warning: ambiguous label or multiplication; preserving whitespace\
     "$test_dir/ambiguous-spaces.hsp" > "$test_dir/ambiguous.expected-stderr"
 cmp "$test_dir/ambiguous.expected-stderr" "$test_dir/ambiguous.stderr"
 
-modes='default compact sample-config compact-config structured-config spacing-compact short parens-add parens-remove comments-semicolon comments-c comments-block labels declarations operator-hsp operator-c increment-hsp increment-c operators-compact operators-hsp combined'
+modes='default compact sample-config compact-config structured-config spacing-compact short short-parens-remove parens-add parens-remove comments-semicolon comments-c comments-block labels declarations operator-hsp operator-c increment-hsp increment-c operators-compact operators-hsp combined'
 for mode in $modes; do
     case "$mode" in
         default) set -- ;;
@@ -70,6 +70,7 @@ for mode in $modes; do
         structured-config) set -- "--config=$repo/presets/structured.hspfmt" ;;
         spacing-compact) set -- --operator-spacing=compact --comma-spacing=compact --colon-spacing=compact --comment-spacing=compact ;;
         short) set -- --short-if --hsp-prefixes ;;
+        short-parens-remove) set -- --short-if --condition-parens=remove --repeat-parens=remove ;;
         parens-add) set -- --condition-parens=add --repeat-parens=add ;;
         parens-remove) set -- --condition-parens=remove --repeat-parens=remove ;;
         comments-semicolon) set -- --comment-style=semicolon --block-comments=lines ;;

@@ -37,7 +37,7 @@ increment-style=c
 condition-parens=remove
 repeat-parens=remove
 
-# 1行の if ブロックを短縮（既定は無効。コメントを外すと有効）。
+# 本文が1行の if ブロックを短縮（既定は無効。コメントを外すと有効）。
 # short-if
 # line-width=100
 

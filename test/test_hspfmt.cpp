@@ -1,6 +1,7 @@
 #include "hspfmt.h"
 #include <iostream>
 #include <stdexcept>
+#include <utility>
 
 namespace {
 unsigned count = 0;
@@ -191,6 +192,105 @@ int main() {
                "; hspfmt: ignore\n#deffunc f int p_a,int p_b\n    return\n");
         expect("; hspfmt: off\n#deffunc f int p_a,int p_b\n; hspfmt: on\n",
                "; hspfmt: off\n#deffunc f int p_a,int p_b\n; hspfmt: on\n");
+        // cHSP scopes explicitly close functions and reset the following HSP code.
+        expect("#chsp_module \"native\" target=c\n"
+               "#chsp_defcfunc sum array[int] a,int n,local[int] v -> int\n"
+               "v=0\nrepeat n\nif a(cnt)>0 {\nv+=a(cnt)\n}\nloop\nreturn v\n"
+               "#chsp_end\n; module comment\n#chsp_module_end\nx=sum(a,2)\n",
+               "#chsp_module \"native\" target=c\n"
+               "#chsp_defcfunc sum array[int] a, int n, local[int] v -> int\n"
+               "    v = 0\n    repeat n\n        if a(cnt) > 0 {\n            v += a(cnt)\n"
+               "        }\n    loop\n    return v\n"
+               "#chsp_end\n; module comment\n#chsp_module_end\nx = sum(a, 2)\n");
+        {
+            const std::string start = "#chsp_module\n";
+            const std::string finish = "\n#chsp_end\n#chsp_module_end\n";
+            for (const auto &signature : {
+                     std::pair<std::string, std::string>{
+                         "#chsp_deffunc f int64 x,label cb,local[int64[2][3][4][5]] v -> void",
+                         "#chsp_deffunc f int64 x, label cb, local[int64[2][3][4][5]] v -> void"},
+                     {"#CHSP_DEFCFUNC f str s,local[str] v -> str ; keep  comment  ",
+                      "#CHSP_DEFCFUNC f str s, local[str] v -> str ; keep  comment  "},
+                     {"#chsp_defcfunc f array[double] a,local[double[8]] v -> double",
+                      "#chsp_defcfunc f array[double] a, local[double[8]] v -> double"},
+                     {"#chsp_defcfunc f -> int64", "#chsp_defcfunc f -> int64"},
+                     {"#chsp_deffunc f", "#chsp_deffunc f"}}) {
+                expect(start + signature.first + finish, start + signature.second + finish);
+            }
+            const std::string signature = "#chsp_defcfunc f int x ,\tlocal[int[2][3]] v -> int";
+            hspfmt::Options spacing;
+            spacing.comma_spacing = hspfmt::Spacing::Compact;
+            expect(start + signature + finish,
+                   start + "#chsp_defcfunc f int x,local[int[2][3]] v -> int" + finish, spacing);
+            spacing.comma_spacing = hspfmt::Spacing::Preserve;
+            expect(start + signature + finish, start + signature + finish, spacing);
+            // Macro-dependent or unfamiliar signatures remain opaque.
+            for (const std::string declaration : {
+                     "#chsp_defcfunc f PARAMS -> int", "#chsp_defcfunc f var a,int b -> int",
+                     "#chsp_defcfunc f local[int[N]] a,int b -> int",
+                     "#chsp_defcfunc f local[int[2][3][4][5][6]] a,int b -> int",
+                     "#chsp_defcfunc f int a,int b -> custom", "#chsp_defcfunc f int a,int b",
+                     "#chsp_deffunc f int a,", "#chsp_deffunc f int a /* keep */,int b",
+                     "#chsp_deffunc f int a,int b -> int"}) {
+                expect(start + declaration + finish, start + declaration + finish);
+            }
+            expect("#chsp_module \\\n target=plugin\n#chsp_defcfunc f \\\n int a,\\\n int b -> int\n"
+                   "return a+b\n#chsp_end\n#chsp_module_end\nx=1\n",
+                   "#chsp_module \\\n target=plugin\n#chsp_defcfunc f \\\n int a,\\\n int b -> int\n"
+                   "    return a + b\n#chsp_end\n#chsp_module_end\nx = 1\n");
+            expect(start + "; hspfmt: ignore\n  #chsp_deffunc f int a,int b\nreturn\n" + finish,
+                   start + "; hspfmt: ignore\n  #chsp_deffunc f int a,int b\n    return\n" + finish);
+            const std::string disabled = "; hspfmt: off\n" + start + signature + finish + "; hspfmt: on\n";
+            expect(disabled + "x=1\n", disabled + "x = 1\n");
+            // C text, its indentation, and HSP-looking tokens must stay intact.
+            const std::string embedded = "#chsp_c {\"\r\n  // hspfmt: off\r\n"
+                "static int inc(int x) { return x+1; }\r\n  /* repeat : #chsp_end */\r\n\"}\r\n"
+                "#chsp_cdecl inc\r\n#chsp_clink \"dl\"\r\n";
+            spacing = {};
+            spacing.operator_style = hspfmt::OperatorStyle::Hsp;
+            spacing.comment_style = hspfmt::CommentStyle::Semicolon;
+            spacing.block_comments = hspfmt::BlockComments::Lines;
+            expect("\xef\xbb\xbf#chsp_module \"native\"\r\n" + embedded +
+                   "#chsp_defcfunc f int x -> int\r\nreturn inc(x+1)\r\n#chsp_end\r\n#chsp_module_end",
+                   "\xef\xbb\xbf#chsp_module \"native\"\r\n" + embedded +
+                   "#chsp_defcfunc f int x -> int\r\n    return inc(x + 1)\r\n#chsp_end\r\n#chsp_module_end", spacing);
+            spacing = {};
+            spacing.tabs = true;
+            spacing.base_indent = 2;
+            expect(start + "#chsp_deffunc f\nrepeat 2\nx=1\nloop\n#chsp_end\nx=2\n#chsp_module_end\n",
+                   start + "#chsp_deffunc f\n\t\trepeat 2\n\t\t\tx = 1\n\t\tloop\n#chsp_end\n\t\tx = 2\n#chsp_module_end\n", spacing);
+            spacing.preserve_indent = true;
+            expect(start + "#chsp_deffunc f\n  return\n#chsp_end\n#chsp_module_end\n",
+                   start + "#chsp_deffunc f\n  return\n#chsp_end\n#chsp_module_end\n", spacing);
+            spacing = {};
+            spacing.blank_lines_before_module = 2;
+            spacing.blank_lines_before_deffunc = 1;
+            spacing.blank_lines_before_defcfunc = 1;
+            expect("x=1\n  ; module docs\n#chsp_module\n  ; function docs\n#chsp_deffunc f\nreturn\n"
+                   "#chsp_end\n  ; result docs\n#chsp_defcfunc g -> int\nreturn 1\n#chsp_end\n#chsp_module_end\n",
+                   "x = 1\n\n\n; module docs\n#chsp_module\n\n; function docs\n#chsp_deffunc f\n    return\n"
+                   "#chsp_end\n\n; result docs\n#chsp_defcfunc g -> int\n    return 1\n#chsp_end\n#chsp_module_end\n", spacing);
+            // Ordinary HSP functions can coexist with native declarations.
+            expect(start + "#deffunc helper\nreturn\n#chsp_deffunc f\nreturn\n" + finish + "x=1\n",
+                   start + "#deffunc helper\n    return\n#chsp_deffunc f\n    return\n" + finish + "x = 1\n");
+        }
+        expect("#chsp_module\n#if FLAG\n#chsp_deffunc f int a\n#else\n#chsp_deffunc f double a\n#endif\n"
+               "return\n#chsp_end\n#chsp_module_end\n",
+               "#chsp_module\n#if FLAG\n#chsp_deffunc f int a\n#else\n#chsp_deffunc f double a\n#endif\n"
+               "    return\n#chsp_end\n#chsp_module_end\n");
+        rejects_at("#chsp_end\n", 1);
+        rejects_at("#chsp_module_end\n", 1);
+        rejects_at("#chsp_deffunc f\n", 1);
+        rejects_at("#chsp_module\n#chsp_module\n", 2);
+        rejects_at("#chsp_module\n#chsp_deffunc f\n#chsp_defcfunc g -> int\n", 3);
+        rejects_at("#chsp_module\n#chsp_deffunc f\n#chsp_module_end\n", 3);
+        rejects_at("#chsp_module\n#chsp_deffunc f\nrepeat 2\n#chsp_end\n", 4);
+        rejects_at("#chsp_module\n#chsp_deffunc f\n#deffunc g\n", 3);
+        rejects_at("#chsp_module\n#chsp_deffunc f\n#global\n", 3);
+        rejects_at("#chsp_module\n#if FLAG\n#chsp_deffunc f\n#endif\n", 4);
+        rejects_at("#if FLAG\n#chsp_module\n#else\nx=1\n#endif\n", 5);
+        rejects_at("\n#chsp_module\n", 2);
+        rejects_at("#chsp_module\n\n#chsp_defcfunc f -> int\nreturn 1\n", 3);
         expect("#deffunc f\nreturn\n; docs for g\n// second line\n#defcfunc g\nreturn 1\n",
                "#deffunc f\n    return\n; docs for g\n// second line\n#defcfunc g\n    return 1\n");
         expect("#deffunc f\nreturn\n  /* docs\n    keep interior */\n#deffunc g\nreturn\n",
@@ -386,7 +486,7 @@ int main() {
         expect("if (flag) { foo=bar:baz=1 }\n", "if flag : foo = bar : baz = 1\n", options);
         expect("if (flag) { foo=bar } : baz=1\n", "if (flag) { foo = bar } : baz = 1\n", options);
         expect("if a { if b { x=1 } }\n", "if a { if b { x = 1 } }\n", options);
-        expect("if a { mes 1 }\n", "if a { mes 1 }\n", options);
+        expect("if a { mes 1 }\n", "if a : mes 1\n", options);
         expect("if a { x=1 } ; note\n", "if a { x = 1 } ; note\n", options);
         expect("if a { x=1 }\nelse { x=2 }\n", "if a { x = 1 }\nelse { x = 2 }\n", options);
         expect("if a { x=1 }\r\n  ELSE { x=2 }",
@@ -396,6 +496,77 @@ int main() {
         expect("if a {\nif b { x=1 }\nelse { x=2 }\n}\n",
                "if a {\n    if b { x = 1 }\n    else { x = 2 }\n}\n", options);
         expect("if a { x=1 }\n; note\ny=2\n", "if a : x = 1\n; note\ny = 2\n", options);
+        expect("if e=0 { uy-- }\nif flag { x+=2:y++ }\nif z=0 { return }\n",
+               "if e = 0 : uy--\nif flag : x += 2 : y++\nif z = 0 : return\n", options);
+        expect("if z=0 {\n  return\n}\nif flag {\nx=1\n}\n",
+               "if z = 0 : return\nif flag : x = 1\n", options);
+        expect("if z {\nreturn 2+3\n}\n", "if z : return 2 + 3\n", options);
+        diagnostic_cases("if z {\nreturn\n}\nfoo*bar\n", "if z : return\nfoo*bar\n",
+                         {{4, "foo*bar"}}, options);
+        expect("if flag {\nx=1\ny=2\n}\n", "if flag {\n    x = 1\n    y = 2\n}\n", options);
+        expect("if flag {\nmes 1\n}\n", "if flag : mes 1\n", options);
+        expect("if flag {\nx(0)=1\n}\n", "if flag : x(0) = 1\n", options);
+        expect("if flag { custom }\nif flag { custom@mod x,2 }\n",
+               "if flag : custom\nif flag : custom@mod x, 2\n", options);
+        expect("if flag { x(0)+=2:x.1++:mes f(1,2):gosub *done }\n",
+               "if flag : x(0) += 2 : x.1++ : mes f(1, 2) : gosub *done\n", options);
+        expect("if flag {\ngoto *done\n}\n", "if flag : goto *done\n", options);
+        expect("if flag {\ncustom a,,b\n}\n", "if flag : custom a,, b\n", options);
+        expect("if flag {\ncustom 1 : mes 2\n}\n", "if flag : custom 1 : mes 2\n", options);
+        expect("if a { if b : x=1 }\n", "if a { if b : x = 1 }\n", options);
+        expect("if a {\nif b : x=1\n}\n", "if a {\n    if b : x = 1\n}\n", options);
+        expect("if a { mes 1 : if b : x=1 }\n", "if a { mes 1 : if b : x = 1 }\n", options);
+        expect("if a { repeat 1 : x=1 : loop }\n", "if a { repeat 1 : x = 1 : loop }\n", options);
+        expect("if a { while b : x=1 : wend }\n", "if a { while b : x = 1 : wend }\n", options);
+        expect("if a { for i,0,2 : x=1 : next }\n", "if a { for i, 0, 2 : x = 1 : next }\n", options);
+        expect("if a { do : x=1 : until b }\n", "if a { do : x = 1 : until b }\n", options);
+        expect("if a { foreach x : mes x(cnt) : loop }\n",
+               "if a { foreach x : mes x(cnt) : loop }\n", options);
+        expect("if a { switch x : case 1 : mes 1 : swbreak : default : mes 2 : swend }\n",
+               "if a { switch x : case 1 : mes 1 : swbreak : default : mes 2 : swend }\n", options);
+        expect("if a {\n*label\n}\n", "if a {\n*label\n}\n", options);
+        expect("if a {\n#define value 1\n}\n", "if a {\n#define value 1\n}\n", options);
+        expect("if a { custom 1 }\nelse { custom 2 }\n",
+               "if a { custom 1 }\nelse { custom 2 }\n", options);
+        expect("if a {\ncustom 1\\\n,2\n}\n", "if a {\ncustom 1\\\n,2\n}\n", options);
+        expect("if flag {\nreturn\n} else {\nx=1\n}\n",
+               "if flag {\n    return\n} else {\n    x = 1\n}\n", options);
+        expect("if flag {\nreturn\n}\n; note\nelse { x=1 }\n",
+               "if flag {\n    return\n}\n; note\nelse { x = 1 }\n", options);
+        expect("if flag {\nreturn ; note\n}\n", "if flag {\n    return ; note\n}\n", options);
+        expect("if flag {\n; note\nreturn\n}\n", "if flag {\n    ; note\n    return\n}\n", options);
+        expect("if flag {\n\nreturn\n}\n", "if flag {\n\n    return\n}\n", options);
+        expect("; hspfmt: ignore\nif flag {\nreturn\n}\n",
+               "; hspfmt: ignore\nif flag {\n    return\n}\n", options);
+        expect("if flag {\n; hspfmt: ignore\nreturn\n}\n",
+               "if flag {\n; hspfmt: ignore\nreturn\n}\n", options);
+        expect("if flag {\nreturn\n; hspfmt: ignore\n}\n",
+               "if flag {\n    return\n; hspfmt: ignore\n}\n", options);
+        expect("; hspfmt: off\nif flag {\n  return\n}\n; hspfmt: on\n",
+               "; hspfmt: off\nif flag {\n  return\n}\n; hspfmt: on\n", options);
+        options.condition_parens = hspfmt::Parentheses::Remove;
+        expect("if (e=0) { uy-- }\nif ((z=0)) {\n  return\n}\n",
+               "if e = 0 : uy--\nif z = 0 : return\n", options);
+        expect("\xef\xbb\xbfif (z=0) {\r\nreturn\r\n}", "\xef\xbb\xbfif z = 0 : return", options);
+        expect("if ((a)+(b)) {\nreturn\n}\n", "if (a) + (b) : return\n", options);
+        options.condition_parens = hspfmt::Parentheses::Add;
+        expect("if e=0 { uy-- }\nif z=0 {\nreturn\n}\n",
+               "if (e = 0) : uy--\nif (z = 0) : return\n", options);
+        options = {};
+        options.short_if = true;
+        options.tabs = true;
+        expect("#deffunc f\nif z=0 {\nreturn\n}\n", "#deffunc f\n\tif z = 0 : return\n", options);
+        options.preserve_indent = true;
+        expect("\t  if flag {\n  return\n }\n", "\t  if flag : return\n", options);
+        options = {};
+        options.short_if = true;
+        options.condition_parens = hspfmt::Parentheses::Remove;
+        options.line_width = 16;
+        expect("if (flag) {\nreturn\n}\n", "if flag : return\n", options);
+        options.line_width = 15;
+        expect("if (flag) {\nreturn\n}\n", "if flag {\n    return\n}\n", options);
+        options = {};
+        options.short_if = true;
         options.line_width = 10;
         expect("if (flag) { x=1 }\n", "if (flag) { x = 1 }\n", options);
         options = {};

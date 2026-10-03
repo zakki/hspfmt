@@ -203,7 +203,7 @@ int main(int argc, char **argv) {
                     "  --hsp-prefixes       Convert 0x/0b to $/% (preserve digits)\n"
                     "  --operator-style=preserve|hsp|c (binary operator spelling)\n"
                     "  --increment-style=preserve|hsp|c (increment/decrement statements)\n"
-                    "  --short-if           Collapse isolated single-line assignment if blocks\n"
+                    "  --short-if           Collapse if blocks containing ordinary statements\n"
                     "  --line-width=N       Short-if byte width limit (default: 100)\n"
                     "  --indent-labels / --no-indent-labels (default: no indentation)\n"
                     "  --comment-style=preserve|semicolon|c (line comment markers)\n"

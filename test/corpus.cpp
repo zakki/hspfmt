@@ -15,7 +15,7 @@ int main(int argc, char **argv) {
     for (int arg = 1; arg < argc; ++arg) {
         for (const auto &entry : std::filesystem::recursive_directory_iterator(argv[arg])) {
             const auto ext = entry.path().extension();
-            if (!entry.is_regular_file() || (ext != ".as" && ext != ".hsp")) continue;
+            if (!entry.is_regular_file() || (ext != ".as" && ext != ".hsp" && ext != ".chsp")) continue;
             std::ifstream file(entry.path(), std::ios::binary);
             const std::string input{std::istreambuf_iterator<char>(file), {}};
             hspfmt::Options options;

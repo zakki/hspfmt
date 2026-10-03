@@ -1,0 +1,64 @@
+#include "hsp3cl.as"
+
+#chsp_module "hspfmt_native" target=plugin
+
+#chsp_c {"
+/* Preserve this C code, including its whitespace. */
+static int adjust(int x) {
+    return x+1;
+}
+"}
+#chsp_cdecl adjust
+
+; Typed arrays and multidimensional local storage.
+#chsp_defcfunc sum_values array[int] values,int n,local[int[2][3]] work,local[int] total -> int
+if n=0 {
+return 0
+}
+total=0
+repeat n
+if values(cnt)>0 {
+work(0,1)=adjust(values(cnt))
+total+=work(0,1)
+}
+loop
+return total
+#chsp_end
+
+; Continued signatures must still indent the body.
+#chsp_deffunc scale \
+ array[double] dst,\
+ double x,\
+ local[double] result
+result=x*1.5
+dst(0)=result
+return
+#chsp_end
+
+#chsp_deffunc invoke array[int] dst,int x,int y
+if x>=0 {
+dst(1)=x+y
+}
+return
+#chsp_end
+
+#deffunc keep_hsp_scope
+return
+
+#chsp_module_end
+
+dim values,3
+values(0)=2
+values(1)=-1
+values(2)=4
+mes sum_values(values,3)
+ddim scaled,1
+scale scaled,2.0
+mes strf("%.2f",scaled(0))
+if values(0)>0 {
+invoke values,2,3
+}
+mes values(1)
+end
+
+keep_hsp_scope
