@@ -34,22 +34,22 @@ jobs:
           persist-credentials: false
 
       - name: Configure
-        run: cmake -S src -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON ${{ matrix.configure_args }}
+        run: cargo test
 
       - name: Build
-        run: cmake --build build --config Release --parallel
+        run: cargo build --release
 
       - name: Test
-        run: ctest --test-dir build -C Release --output-on-failure --no-tests=error
+        run: cargo test
 
       - name: Check corpus invariants
-        run: ${{ matrix.corpus }} test
+        run: cargo run --bin hspfmt_corpus -- test
 
       - name: Stage Windows package
         if: runner.os == 'Windows'
         run: |
           cmake -E make_directory build/package
-          cmake -E copy build/Release/hspfmt.exe README.md CONFIGURATION.md DESIGN.md LICENSE .hspfmt.example build/package/
+          cmake -E copy target/release/hspfmt.exe README.md CONFIGURATION.md DESIGN.md LICENSE .hspfmt.example build/package/
           cmake -E copy_directory presets build/package/presets
 
       - name: Create Windows ZIP
