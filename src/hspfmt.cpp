@@ -514,9 +514,9 @@ std::string declaration_commas(std::string_view raw, const std::vector<Item> &it
     out.append(raw.substr(consumed));
     return out;
 }
-void close_block(State &state, std::string_view close) {
+void close_block(State &state, std::string_view close, std::size_t line) {
     if (state.blocks.empty() || state.blocks.back().close != close)
-        throw std::runtime_error("unmatched block terminator: " + std::string(close));
+        throw Error("unmatched block terminator: " + std::string(close), line);
     state.blocks.pop_back();
 }
 
@@ -531,7 +531,7 @@ void parse_line(const std::vector<Item> &items, State &state, std::size_t line) 
             state.blocks.push_back({"}", false, line});
             statement = true;
         } else if (item.text == "}") {
-            close_block(state, "}");
+            close_block(state, "}", line);
             statement = true;
         } else if (item.text == ":") {
             statement = true;
@@ -543,10 +543,10 @@ void parse_line(const std::vector<Item> &items, State &state, std::size_t line) 
                 else if (word == "do") state.blocks.push_back({"until", false, line});
                 else if (word == "switch") state.blocks.push_back({"swend", false, line});
                 else if (one_of(word, {"loop", "wend", "next", "until", "swend"}))
-                    close_block(state, word);
+                    close_block(state, word, line);
                 else if (word == "case" || word == "default") {
                     if (state.blocks.empty() || state.blocks.back().close != "swend")
-                        throw std::runtime_error("case/default outside switch");
+                        throw Error("case/default outside switch", line);
                     state.blocks.back().case_body = true;
                 }
             }
@@ -1040,6 +1040,156 @@ std::vector<Token> lex(std::string_view s, Encoding encoding) {
     return tokens;
 }
 
+namespace {
+struct FormatContext {
+    std::string_view source;
+    const Options &options;
+    std::vector<Diagnostic> *diagnostics;
+    const std::vector<std::string_view> &original_lines;
+    const std::vector<Token> &tokens;
+
+    State state;
+    std::vector<Conditional> conditionals;
+    std::vector<Item> items;
+    std::string out;
+    std::size_t begin = 0;
+    bool protected_line = false;
+    bool continuation = false;
+    std::string gap;
+    std::size_t line_number = 1;
+    std::size_t line_start = 1; // First physical line of the logical line being collected.
+    bool disabled = false;
+    bool ignored = false;
+
+    void flush(std::size_t end, std::string_view newline, std::size_t next_token);
+};
+
+void FormatContext::flush(std::size_t end, std::string_view newline, std::size_t next_token) {
+    const std::string_view raw = source.substr(begin, end - begin);
+    bool preserve = protected_line || continuation || disabled || ignored;
+    const bool next_continuation = !items.empty() && items.back().text == "\\";
+    if (next_continuation) preserve = true;
+    const bool was_disabled = disabled;
+    const bool was_ignored = ignored;
+    ignored = false;
+    if (items.size() == 1 && items[0].kind == Kind::Comment) {
+        const auto kind = marker_kind(items[0].text);
+        if (kind == Marker::Off) { disabled = true; preserve = true; }
+        if (kind == Marker::On) { disabled = false; preserve = true; }
+        if (kind == Marker::Ignore) { ignored = true; preserve = true; }
+    }
+    ignored = ignored || (was_ignored && next_continuation);
+    const bool opaque = continuation || next_continuation || was_disabled || disabled;
+    const bool label = items.size() >= 2 && items[0].text == "*" && items[1].kind == Kind::Word;
+    const auto directive = items.size() > 1 && items[0].text == "#" ? lower(items[1].text) : "";
+    // A continued cHSP signature stays byte-for-byte intact, but its first
+    // line still starts the function/module scope used by subsequent code.
+    const bool continued_chsp = next_continuation && !continuation && !was_disabled && !disabled &&
+        one_of(directive, {"chsp_module", "chsp_deffunc", "chsp_defcfunc"});
+    if ((!opaque || continued_chsp) && !items.empty() && items[0].text == "#") {
+        preserve = true;
+        if (one_of(directive, {"if", "ifdef", "ifndef"})) {
+            conditionals.push_back({state, {}, false, false, line_start});
+        } else if (directive == "else" || directive == "elif") {
+            if (conditionals.empty()) throw Error("unmatched preprocessor branch", line_start);
+            auto &c = conditionals.back();
+            if (c.has_else) throw Error("branch after #else", line_start);
+            if (c.has_branch && !c.branch.same_structure(state))
+                throw Error("conditional branches have different block structure", line_start);
+            if (c.has_branch) state.function = std::max(state.function, c.branch.function);
+            if (c.has_branch) state.label = std::max(state.label, c.branch.label);
+            c.branch = state;
+            c.has_branch = true;
+            c.has_else = directive == "else";
+            state = c.before;
+        } else if (directive == "endif") {
+            if (conditionals.empty()) throw Error("unmatched #endif", line_start);
+            const auto c = conditionals.back();
+            conditionals.pop_back();
+            if ((c.has_branch && !c.branch.same_structure(state)) || (!c.has_else && !c.before.same_structure(state)))
+                throw Error("conditional branches have different block structure", line_start);
+            if (c.has_branch) state.function = std::max(state.function, c.branch.function);
+            if (!c.has_else) state.function = std::max(state.function, c.before.function);
+            if (c.has_branch) state.label = std::max(state.label, c.branch.label);
+            if (!c.has_else) state.label = std::max(state.label, c.before.label);
+        } else if (directive == "chsp_module") {
+            if (!state.blocks.empty() || state.chsp_module)
+                throw Error("nested cHSP module or module inside open block", line_start);
+            state.chsp_module = line_start;
+            state.function = state.label = 0;
+        } else if (one_of(directive, {"chsp_deffunc", "chsp_defcfunc"})) {
+            if (!state.chsp_module) throw Error("cHSP function outside #chsp_module", line_start);
+            if (!state.blocks.empty() || state.chsp_function)
+                throw Error("cHSP function inside open block or function", line_start);
+            state.chsp_function = line_start;
+            state.function = 1;
+            state.label = 0;
+        } else if (directive == "chsp_end") {
+            if (!state.chsp_function) throw Error("unmatched #chsp_end", line_start);
+            if (!state.blocks.empty()) throw Error("#chsp_end inside open block", line_start);
+            state.chsp_function = 0;
+            state.function = state.label = 0;
+        } else if (directive == "chsp_module_end") {
+            if (!state.chsp_module) throw Error("unmatched #chsp_module_end", line_start);
+            if (!state.blocks.empty() || state.chsp_function)
+                throw Error("#chsp_module_end inside open block or function", line_start);
+            state.chsp_module = 0;
+            state.function = state.label = 0;
+        } else if (one_of(directive, {"deffunc", "defcfunc", "modfunc", "modcfunc", "modinit", "modterm"})) {
+            if (state.chsp_function) throw Error("HSP function inside cHSP function", line_start);
+            if (!state.blocks.empty()) throw Error("function declaration inside open block", line_start);
+            state.function = 1;
+            state.label = 0;
+        } else if (directive == "global" || directive == "module") {
+            if (state.chsp_function) throw Error("HSP module boundary inside cHSP function", line_start);
+            if (!state.blocks.empty()) throw Error("module boundary inside open block", line_start);
+            state.function = 0;
+            state.label = 0;
+        }
+    } else if (!preserve) {
+        State line_state = state;
+        if (!items.empty()) {
+            const auto first = lower(items[0].text);
+            if (one_of(first, {"}", "loop", "wend", "next", "until", "swend"}))
+                close_block(line_state, first, line_start);
+            else if ((first == "case" || first == "default") && !line_state.blocks.empty())
+                line_state.blocks.back().case_body = false;
+        }
+        const unsigned depth = label ? 0 : line_state.depth(options);
+        const auto indentation = raw.substr(0, raw.find_first_not_of(" \t"));
+        const auto indent_size = options.preserve_indent ? indentation.size() :
+            options.tabs ? depth : depth * options.indent_width;
+        const bool following_else = options.short_if && !items.empty() &&
+            lower(items[0].text) == "if" && followed_by_else(source, tokens, next_token);
+        auto printed = following_else ? items : short_if(items, options, indent_size);
+        printed = expression_parens(printed, options);
+        printed = operator_spelling(std::move(printed), options);
+        if (!items.empty()) {
+            if (options.preserve_indent) out.append(indentation);
+            else out.append(indent_size, options.tabs ? '\t' : ' ');
+            bool ambiguous_spacing = false;
+            out += print_items(printed, options, &ambiguous_spacing);
+            if (ambiguous_spacing && diagnostics)
+                diagnostics->push_back({line_number, std::string(original_lines.at(line_number - 1))});
+        }
+    }
+    if (!opaque && label && options.indent_labels) state.label = 1;
+    if (!opaque && (items.empty() || items[0].text != "#")) parse_line(items, state, line_start);
+    if (preserve) {
+        if (!opaque && !protected_line && !was_ignored && !items.empty() && items[0].text == "#")
+            out += declaration_commas(raw, items, options);
+        else out.append(raw);
+    }
+    out.append(newline);
+    continuation = next_continuation;
+    items.clear();
+    protected_line = false;
+    gap.clear();
+    begin = end + newline.size();
+}
+
+} // namespace
+
 std::string format(std::string_view source, const Options &user_options,
                    std::vector<Diagnostic> *diagnostics) {
     Options options = user_options;
@@ -1060,180 +1210,58 @@ std::string format(std::string_view source, const Options &user_options,
             if (pos < source.size() && source[pos++] == '\r' && pos < source.size() && source[pos] == '\n') ++pos;
         }
     }
+
+    // Pre-formatting pass 1: normalize full-width spaces outside identifiers/strings.
     std::string normalized;
     if (options.full_width_spaces == FullWidthSpaces::Normalize) {
         normalized = normalize_full_width_spaces(source, options.encoding);
         source = normalized;
     }
+
+    // Pre-formatting pass 2: rewrite comment syntax (//, /* */, ;) if configured.
     std::string rewritten;
     if (options.comment_style != CommentStyle::Preserve || options.block_comments != BlockComments::Preserve) {
         rewritten = rewrite_comments(source, options);
         source = rewritten;
     }
+
+    // Main formatting pass: tokenization, block structure tracking, and line indentation.
     const auto tokens = lex(source, options.encoding);
-    State state;
-    std::vector<Conditional> conditionals;
-    std::vector<Item> items;
-    std::string out;
-    std::size_t begin = 0;
-    bool protected_line = false;
-    bool continuation = false;
-    std::string gap;
-    std::size_t line_number = 1;
-    std::size_t line_start = 1; // First physical line of the logical line being collected.
-    bool disabled = false, ignored = false;
-    auto flush = [&](std::size_t end, std::string_view newline, std::size_t next_token) {
-        const std::string_view raw = source.substr(begin, end - begin);
-        bool preserve = protected_line || continuation || disabled || ignored;
-        const bool next_continuation = !items.empty() && items.back().text == "\\";
-        if (next_continuation) preserve = true;
-        const bool was_disabled = disabled;
-        const bool was_ignored = ignored;
-        ignored = false;
-        if (items.size() == 1 && items[0].kind == Kind::Comment) {
-            const auto kind = marker_kind(items[0].text);
-            if (kind == Marker::Off) { disabled = true; preserve = true; }
-            if (kind == Marker::On) { disabled = false; preserve = true; }
-            if (kind == Marker::Ignore) { ignored = true; preserve = true; }
+    FormatContext ctx{source, options, diagnostics, original_lines, tokens,
+                      {}, {}, {}, "", 0, false, false, "", 1, 1, false, false};
+
+    for (std::size_t token_index = 0; token_index < tokens.size(); ++token_index) {
+        const auto &token = tokens[token_index];
+        const auto text = source.substr(token.begin, token.end - token.begin);
+        if (token.kind == Kind::Bom) { ctx.out.append(text); ctx.begin = token.end; }
+        else if (token.kind == Kind::Newline) ctx.flush(token.begin, text, token_index + 1);
+        else if (token.kind == Kind::Space) ctx.gap.append(text);
+        else {
+            // Multiline tokens are copied together with their entire surrounding line.
+            if (text.find_first_of("\r\n") != std::string_view::npos) ctx.protected_line = true;
+            ctx.items.push_back({token.kind, std::string(text), ctx.gap});
+            ctx.gap.clear();
         }
-        ignored = ignored || (was_ignored && next_continuation);
-        const bool opaque = continuation || next_continuation || was_disabled || disabled;
-        const bool label = items.size() >= 2 && items[0].text == "*" && items[1].kind == Kind::Word;
-        const auto directive = items.size() > 1 && items[0].text == "#" ? lower(items[1].text) : "";
-        // A continued cHSP signature stays byte-for-byte intact, but its first
-        // line still starts the function/module scope used by subsequent code.
-        const bool continued_chsp = next_continuation && !continuation && !was_disabled && !disabled &&
-            one_of(directive, {"chsp_module", "chsp_deffunc", "chsp_defcfunc"});
-        if ((!opaque || continued_chsp) && !items.empty() && items[0].text == "#") {
-            preserve = true;
-            if (one_of(directive, {"if", "ifdef", "ifndef"})) {
-                conditionals.push_back({state, {}, false, false, line_start});
-            } else if (directive == "else" || directive == "elif") {
-                if (conditionals.empty()) throw std::runtime_error("unmatched preprocessor branch");
-                auto &c = conditionals.back();
-                if (c.has_else) throw std::runtime_error("branch after #else");
-                if (c.has_branch && !c.branch.same_structure(state)) throw std::runtime_error("conditional branches have different block structure");
-                if (c.has_branch) state.function = std::max(state.function, c.branch.function);
-                if (c.has_branch) state.label = std::max(state.label, c.branch.label);
-                c.branch = state;
-                c.has_branch = true;
-                c.has_else = directive == "else";
-                state = c.before;
-            } else if (directive == "endif") {
-                if (conditionals.empty()) throw std::runtime_error("unmatched #endif");
-                const auto c = conditionals.back();
-                conditionals.pop_back();
-                if ((c.has_branch && !c.branch.same_structure(state)) || (!c.has_else && !c.before.same_structure(state)))
-                    throw std::runtime_error("conditional branches have different block structure");
-                if (c.has_branch) state.function = std::max(state.function, c.branch.function);
-                if (!c.has_else) state.function = std::max(state.function, c.before.function);
-                if (c.has_branch) state.label = std::max(state.label, c.branch.label);
-                if (!c.has_else) state.label = std::max(state.label, c.before.label);
-            } else if (directive == "chsp_module") {
-                if (!state.blocks.empty() || state.chsp_module) throw std::runtime_error("nested cHSP module or module inside open block");
-                state.chsp_module = line_start;
-                state.function = state.label = 0;
-            } else if (one_of(directive, {"chsp_deffunc", "chsp_defcfunc"})) {
-                if (!state.chsp_module) throw std::runtime_error("cHSP function outside #chsp_module");
-                if (!state.blocks.empty() || state.chsp_function) throw std::runtime_error("cHSP function inside open block or function");
-                state.chsp_function = line_start;
-                state.function = 1;
-                state.label = 0;
-            } else if (directive == "chsp_end") {
-                if (!state.chsp_function) throw std::runtime_error("unmatched #chsp_end");
-                if (!state.blocks.empty()) throw std::runtime_error("#chsp_end inside open block");
-                state.chsp_function = 0;
-                state.function = state.label = 0;
-            } else if (directive == "chsp_module_end") {
-                if (!state.chsp_module) throw std::runtime_error("unmatched #chsp_module_end");
-                if (!state.blocks.empty() || state.chsp_function) throw std::runtime_error("#chsp_module_end inside open block or function");
-                state.chsp_module = 0;
-                state.function = state.label = 0;
-            } else if (one_of(directive, {"deffunc", "defcfunc", "modfunc", "modcfunc", "modinit", "modterm"})) {
-                if (state.chsp_function) throw std::runtime_error("HSP function inside cHSP function");
-                if (!state.blocks.empty()) throw std::runtime_error("function declaration inside open block");
-                state.function = 1;
-                state.label = 0;
-            } else if (directive == "global" || directive == "module") {
-                if (state.chsp_function) throw std::runtime_error("HSP module boundary inside cHSP function");
-                if (!state.blocks.empty()) throw std::runtime_error("module boundary inside open block");
-                state.function = 0;
-                state.label = 0;
-            }
-        } else if (!preserve) {
-            State line_state = state;
-            if (!items.empty()) {
-                const auto first = lower(items[0].text);
-                if (one_of(first, {"}", "loop", "wend", "next", "until", "swend"})) close_block(line_state, first);
-                else if ((first == "case" || first == "default") && !line_state.blocks.empty())
-                    line_state.blocks.back().case_body = false;
-            }
-            const unsigned depth = label ? 0 : line_state.depth(options);
-            const auto indentation = raw.substr(0, raw.find_first_not_of(" \t"));
-            const auto indent_size = options.preserve_indent ? indentation.size() :
-                options.tabs ? depth : depth * options.indent_width;
-            const bool following_else = options.short_if && !items.empty() &&
-                lower(items[0].text) == "if" && followed_by_else(source, tokens, next_token);
-            auto printed = following_else ? items : short_if(items, options, indent_size);
-            printed = expression_parens(printed, options);
-            printed = operator_spelling(std::move(printed), options);
-            if (!items.empty()) {
-                if (options.preserve_indent) out.append(indentation);
-                else out.append(indent_size, options.tabs ? '\t' : ' ');
-                bool ambiguous_spacing = false;
-                out += print_items(printed, options, &ambiguous_spacing);
-                if (ambiguous_spacing && diagnostics)
-                    diagnostics->push_back({line_number, std::string(original_lines.at(line_number - 1))});
-            }
+        for (std::size_t i = 0; i < text.size(); ++i) {
+            if (text[i] == '\r') {
+                ++ctx.line_number;
+                if (i + 1 < text.size() && text[i + 1] == '\n') ++i;
+            } else if (text[i] == '\n') ++ctx.line_number;
         }
-        if (!opaque && label && options.indent_labels) state.label = 1;
-        if (!opaque && (items.empty() || items[0].text != "#")) parse_line(items, state, line_start);
-        if (preserve) {
-            if (!opaque && !protected_line && !was_ignored && !items.empty() && items[0].text == "#")
-                out += declaration_commas(raw, items, options);
-            else out.append(raw);
-        }
-        out.append(newline);
-        continuation = next_continuation;
-        items.clear();
-        protected_line = false;
-        gap.clear();
-        begin = end + newline.size();
-    };
-    try {
-        for (std::size_t token_index = 0; token_index < tokens.size(); ++token_index) {
-            const auto &token = tokens[token_index];
-            const auto text = source.substr(token.begin, token.end - token.begin);
-            if (token.kind == Kind::Bom) { out.append(text); begin = token.end; }
-            else if (token.kind == Kind::Newline) flush(token.begin, text, token_index + 1);
-            else if (token.kind == Kind::Space) gap.append(text);
-            else {
-                // Multiline tokens are copied together with their entire surrounding line.
-                if (text.find_first_of("\r\n") != std::string_view::npos) protected_line = true;
-                items.push_back({token.kind, std::string(text), gap});
-                gap.clear();
-            }
-            for (std::size_t i = 0; i < text.size(); ++i) {
-                if (text[i] == '\r') {
-                    ++line_number;
-                    if (i + 1 < text.size() && text[i + 1] == '\n') ++i;
-                } else if (text[i] == '\n') ++line_number;
-            }
-            if (token.kind == Kind::Newline) line_start = line_number;
-        }
-        if (begin < source.size()) flush(source.size(), "", tokens.size());
-    } catch (const Error &) {
-        throw;
-    } catch (const std::runtime_error &error) {
-        throw Error(error.what(), line_start);
+        if (token.kind == Kind::Newline) ctx.line_start = ctx.line_number;
     }
-    if (!conditionals.empty())
-        throw Error("unterminated preprocessor conditional", conditionals.back().line);
-    if (!state.blocks.empty())
-        throw Error("unterminated block, expected " + state.blocks.back().close, state.blocks.back().line);
-    if (state.chsp_function) throw Error("unterminated cHSP function, expected #chsp_end", state.chsp_function);
-    if (state.chsp_module) throw Error("unterminated cHSP module, expected #chsp_module_end", state.chsp_module);
-    return declaration_layout(short_if_lines(out, options), options);
+    if (ctx.begin < source.size()) ctx.flush(source.size(), "", tokens.size());
+
+    if (!ctx.conditionals.empty())
+        throw Error("unterminated preprocessor conditional", ctx.conditionals.back().line);
+    if (!ctx.state.blocks.empty())
+        throw Error("unterminated block, expected " + ctx.state.blocks.back().close, ctx.state.blocks.back().line);
+    if (ctx.state.chsp_function) throw Error("unterminated cHSP function, expected #chsp_end", ctx.state.chsp_function);
+    if (ctx.state.chsp_module) throw Error("unterminated cHSP module, expected #chsp_module_end", ctx.state.chsp_module);
+
+    // Post-formatting pass 1: collapse short if statements onto single lines (if short_if enabled).
+    // Post-formatting pass 2: insert blank lines before modules/functions according to layout settings.
+    return declaration_layout(short_if_lines(ctx.out, options), options);
 }
 
 } // namespace hspfmt
