@@ -1,0 +1,4 @@
+# Ensure golden test cases and fixtures are treated as binary to prevent CRLF/LF and encoding conversions
+test/cases/** -text
+test/*.hsp -text
+test/*.chsp -text

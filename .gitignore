@@ -40,3 +40,8 @@ hsptmp
 *.swp
 *.swo
 *~
+
+# Rust and external test artifacts
+/target/
+/tmp/
+/hsp3-ginger/
