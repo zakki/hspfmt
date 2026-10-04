@@ -1,0 +1,9 @@
+--encoding=cp932
+--full-width-spaces=normalize
+--block-comments=lines
+--comment-style=c
+--short-if
+--condition-parens=remove
+--hsp-prefixes
+--blank-lines-before-module=1
+--blank-lines-before-deffunc=1

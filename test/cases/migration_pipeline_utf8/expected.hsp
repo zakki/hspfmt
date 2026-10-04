@@ -1,0 +1,11 @@
+﻿// heading
+//body 
+
+#module sample
+
+// procedure
+#deffunc p_run
+    if 1 : mes $10, %11
+    mes 1.25, 1e+2, 1e-2
+    return
+#global

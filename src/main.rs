@@ -1,7 +1,4 @@
-use hspfmt::{
-    format, lex, BlockComments, CommentStyle, Encoding, FullWidthSpaces, OperatorStyle, Options,
-    Parentheses, Spacing,
-};
+use hspfmt::{format, lex, Options};
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
@@ -117,7 +114,13 @@ impl Drop for Cleanup {
 }
 
 fn replace_file(path: &Path, output: &[u8]) -> Result<(), String> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    #[cfg(unix)]
+    let parent_directory =
+        File::open(parent).map_err(|e| format!("cannot open input directory: {}", e))?;
     let mut directory = PathBuf::new();
 
     // Use timestamp and process ID to generate pseudorandom names without external crates
@@ -155,202 +158,46 @@ fn replace_file(path: &Path, output: &[u8]) -> Result<(), String> {
         File::create(&temporary).map_err(|_| "cannot create temporary output".to_string())?;
     file.write_all(output)
         .map_err(|_| "temporary output write failed".to_string())?;
-    file.sync_all()
-        .map_err(|_| "temporary output write failed".to_string())?;
-    drop(file);
-
     #[cfg(not(windows))]
     {
         let permissions = fs::metadata(path)
             .map_err(|e| format!("cannot read input permissions: {}", e))?
             .permissions();
-        fs::set_permissions(&temporary, permissions)
+        file.set_permissions(permissions)
             .map_err(|e| format!("cannot preserve input permissions: {}", e))?;
-        fs::rename(&temporary, path).map_err(|e| format!("cannot replace input file: {}", e))?;
     }
+    file.sync_all()
+        .map_err(|_| "temporary output write failed".to_string())?;
+    drop(file);
+
+    #[cfg(not(windows))]
+    fs::rename(&temporary, path).map_err(|e| format!("cannot replace input file: {}", e))?;
     #[cfg(windows)]
     windows_file::replace(path, &temporary)
         .map_err(|e| format!("cannot replace input file: {}", e))?;
 
+    drop(_cleanup);
+    #[cfg(unix)]
+    parent_directory.sync_all().map_err(|e| {
+        format!(
+            "input file replaced but parent directory sync failed: {}",
+            e
+        )
+    })?;
     Ok(())
-}
-
-fn number(s: &str) -> Result<usize, String> {
-    if s.is_empty() || !s.chars().all(|c| c.is_ascii_digit()) {
-        return Err(format!("invalid numeric option: {}", s));
-    }
-    let significant = s.find(|c| c != '0');
-    if let Some(pos) = significant {
-        if s.len() - pos > 5 {
-            return Err(format!("numeric option too large: {}", s));
-        }
-    }
-    match s.parse::<usize>() {
-        Ok(v) if v <= 10000 => Ok(v),
-        _ => Err(format!("numeric option too large: {}", s)),
-    }
-}
-
-fn parentheses(s: &str) -> Result<Parentheses, String> {
-    match s {
-        "preserve" => Ok(Parentheses::Preserve),
-        "add" => Ok(Parentheses::Add),
-        "remove" => Ok(Parentheses::Remove),
-        _ => Err(format!("invalid parentheses mode: {}", s)),
-    }
-}
-
-fn blank_lines(s: &str) -> Result<i32, String> {
-    if s == "preserve" {
-        return Ok(-1);
-    }
-    let value = number(s)?;
-    if value > 16 {
-        return Err("blank line count must be between 0 and 16".to_string());
-    }
-    Ok(value as i32)
-}
-
-fn operator_style(s: &str) -> Result<OperatorStyle, String> {
-    match s {
-        "preserve" => Ok(OperatorStyle::Preserve),
-        "hsp" => Ok(OperatorStyle::Hsp),
-        "c" => Ok(OperatorStyle::C),
-        _ => Err(format!("invalid operator style: {}", s)),
-    }
-}
-
-fn spacing(s: &str) -> Result<Spacing, String> {
-    match s {
-        "preserve" => Ok(Spacing::Preserve),
-        "space" => Ok(Spacing::Space),
-        "compact" => Ok(Spacing::Compact),
-        _ => Err(format!("invalid spacing mode: {}", s)),
-    }
-}
-
-fn parse_formatting_option(arg: &str, options: &mut Options) -> Result<bool, String> {
-    if arg == "--tabs" {
-        options.tabs = true;
-    } else if arg == "--compact-operators" {
-        options.operator_spacing = Spacing::Compact;
-    } else if let Some(v) = arg.strip_prefix("--operator-spacing=") {
-        options.operator_spacing = spacing(v)?;
-    } else if let Some(v) = arg.strip_prefix("--comma-spacing=") {
-        options.comma_spacing = spacing(v)?;
-    } else if let Some(v) = arg.strip_prefix("--colon-spacing=") {
-        options.colon_spacing = spacing(v)?;
-    } else if let Some(v) = arg.strip_prefix("--comment-spacing=") {
-        options.comment_spacing = spacing(v)?;
-    } else if arg == "--hsp-prefixes" {
-        options.hsp_numeric_prefixes = true;
-    } else if arg == "--short-if" {
-        options.short_if = true;
-    } else if let Some(value) = arg.strip_prefix("--full-width-spaces=") {
-        match value {
-            "preserve" => options.full_width_spaces = FullWidthSpaces::Preserve,
-            "normalize" => options.full_width_spaces = FullWidthSpaces::Normalize,
-            _ => return Err(format!("invalid full-width space mode: {}", value)),
-        }
-    } else if let Some(v) = arg.strip_prefix("--operator-style=") {
-        options.operator_style = operator_style(v)?;
-    } else if let Some(v) = arg.strip_prefix("--increment-style=") {
-        options.increment_style = operator_style(v)?;
-    } else if arg == "--indent-labels" {
-        options.indent_labels = true;
-    } else if arg == "--no-indent-labels" {
-        options.indent_labels = false;
-    } else if let Some(value) = arg.strip_prefix("--comment-style=") {
-        match value {
-            "preserve" => options.comment_style = CommentStyle::Preserve,
-            "semicolon" => options.comment_style = CommentStyle::Semicolon,
-            "c" => options.comment_style = CommentStyle::C,
-            _ => return Err(format!("invalid comment style: {}", value)),
-        }
-    } else if let Some(value) = arg.strip_prefix("--block-comments=") {
-        match value {
-            "preserve" => options.block_comments = BlockComments::Preserve,
-            "lines" => options.block_comments = BlockComments::Lines,
-            "block" => options.block_comments = BlockComments::Block,
-            _ => return Err(format!("invalid block comment mode: {}", value)),
-        }
-    } else if let Some(v) = arg.strip_prefix("--condition-parens=") {
-        options.condition_parens = parentheses(v)?;
-    } else if let Some(v) = arg.strip_prefix("--repeat-parens=") {
-        options.repeat_parens = parentheses(v)?;
-    } else if let Some(v) = arg.strip_prefix("--blank-lines-before-module=") {
-        options.blank_lines_before_module = blank_lines(v)?;
-    } else if let Some(v) = arg.strip_prefix("--blank-lines-before-deffunc=") {
-        options.blank_lines_before_deffunc = blank_lines(v)?;
-    } else if let Some(v) = arg.strip_prefix("--blank-lines-before-defcfunc=") {
-        options.blank_lines_before_defcfunc = blank_lines(v)?;
-    } else if arg == "--encoding=auto" {
-        options.encoding = Encoding::Auto;
-    } else if arg == "--encoding=cp932" {
-        options.encoding = Encoding::Cp932;
-    } else if arg == "--encoding=utf8" {
-        options.encoding = Encoding::Utf8;
-    } else if let Some(v) = arg.strip_prefix("--encoding=") {
-        return Err(format!("invalid encoding: {}", v));
-    } else if let Some(v) = arg.strip_prefix("--base-indent=") {
-        options.base_indent = number(v)?;
-    } else if let Some(v) = arg.strip_prefix("--loop-indent=") {
-        options.loop_indent = number(v)?;
-    } else if let Some(value) = arg.strip_prefix("--indent=") {
-        options.preserve_indent = value == "preserve";
-        if !options.preserve_indent {
-            options.indent_width = number(value)?;
-        }
-    } else if let Some(v) = arg.strip_prefix("--line-width=") {
-        options.line_width = number(v)?;
-    } else {
-        return Ok(false);
-    }
-    Ok(true)
 }
 
 fn load_config(path: &Path, options: &mut Options) -> Result<(), String> {
     let content =
         fs::read(path).map_err(|_| format!("cannot open config file: {}", path.display()))?;
-    for (line_idx, line) in content.split(|&b| b == b'\n').enumerate() {
-        // These ASCII separators cannot occur inside a CP932 multibyte character.
-        let is_space = |b: &u8| matches!(b, b' ' | b'\t' | b'\r' | b'\n');
-        let start = line.iter().position(|b| !is_space(b)).unwrap_or(line.len());
-        let end = line
-            .iter()
-            .rposition(|b| !is_space(b))
-            .map_or(start, |i| i + 1);
-        let trimmed = &line[start..end];
-        if trimmed.is_empty() || trimmed.starts_with(b"#") || trimmed.starts_with(b";") {
-            continue;
-        }
-        if !trimmed.is_ascii() {
-            return Err(format!(
-                "{}:{}: config options must be ASCII",
-                path.display(),
-                line_idx + 1
-            ));
-        }
-        // ASCII is valid UTF-8.
-        let trimmed = std::str::from_utf8(trimmed).unwrap();
-        let opt = if trimmed.starts_with("--") {
-            trimmed.to_string()
-        } else {
-            format!("--{}", trimmed)
-        };
-        match parse_formatting_option(&opt, options) {
-            Ok(true) => {}
-            _ => {
-                return Err(format!(
-                    "{}:{}: invalid or unsupported config option: {}",
-                    path.display(),
-                    line_idx + 1,
-                    opt
-                ));
-            }
-        }
-    }
-    Ok(())
+    hspfmt::config::parse_config(&content, options).map_err(|error| {
+        format!(
+            "{}:{}: {}",
+            path.display(),
+            error.line().unwrap_or(1),
+            error.message()
+        )
+    })
 }
 
 fn print_help() -> io::Result<()> {
@@ -427,12 +274,13 @@ fn run() -> Result<i32, (Option<String>, String, Option<usize>)> {
         }
     }
 
-    if !no_config {
-        if !config_path.as_os_str().is_empty() {
-            load_config(&config_path, &mut options).map_err(|e| (None, e, None))?;
-        } else if Path::new(".hspfmt").exists() {
-            load_config(Path::new(".hspfmt"), &mut options).map_err(|e| (None, e, None))?;
-        }
+    if let Some(path) = hspfmt::config::find_config(
+        Path::new(""),
+        (!config_path.as_os_str().is_empty()).then_some(config_path.as_path()),
+        no_config,
+        Path::exists,
+    ) {
+        load_config(&path, &mut options).map_err(|e| (None, e, None))?;
     }
 
     // Second pass: options and filenames
@@ -454,7 +302,9 @@ fn run() -> Result<i32, (Option<String>, String, Option<usize>)> {
             roundtrip = true;
         } else if let Some(path) = path_option(arg, "--stdin-filepath=") {
             stdin_filepath = path;
-        } else if parse_formatting_option(text, &mut options).map_err(|e| (None, e, None))? {
+        } else if hspfmt::config::parse_formatting_option(text, &mut options)
+            .map_err(|e| (None, e, None))?
+        {
             // Handled formatting option
         } else if arg != "-" && arg.to_string_lossy().starts_with('-') {
             return Err((
@@ -594,13 +444,8 @@ fn run() -> Result<i32, (Option<String>, String, Option<usize>)> {
         };
 
         let output = if roundtrip {
-            let tokens = lex(&source, options.encoding).map_err(|e| {
-                (
-                    Some(input_name.clone()),
-                    e.message().to_string(),
-                    if e.line() > 0 { Some(e.line()) } else { None },
-                )
-            })?;
+            let tokens = lex(&source, options.encoding)
+                .map_err(|e| (Some(input_name.clone()), e.message().to_string(), e.line()))?;
             let mut out = Vec::with_capacity(source.len());
             for token in tokens {
                 out.extend_from_slice(&source[token.begin..token.end]);
@@ -608,13 +453,8 @@ fn run() -> Result<i32, (Option<String>, String, Option<usize>)> {
             out
         } else {
             let mut diagnostics = Vec::new();
-            let res = format(&source, &options, Some(&mut diagnostics)).map_err(|e| {
-                (
-                    Some(input_name.clone()),
-                    e.message().to_string(),
-                    if e.line() > 0 { Some(e.line()) } else { None },
-                )
-            })?;
+            let res = format(&source, &options, Some(&mut diagnostics))
+                .map_err(|e| (Some(input_name.clone()), e.message().to_string(), e.line()))?;
             for diag in diagnostics {
                 eprintln!(
                     "{}:{}: warning: ambiguous label or multiplication; preserving whitespace",

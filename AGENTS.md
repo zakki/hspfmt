@@ -8,10 +8,13 @@
 - `CONFIGURATION.md`: 設定ファイル・プリセット・各オプションの詳細と実例（Before/After）。
 - `DESIGN.md`: 設計思想、構文解析と制約、安全性、テスト戦略。
 - `Cargo.toml`: Cargoパッケージ定義（ライブラリおよびバイナリ）。
-- `src/lib.rs`: 文字コードの検証、字句解析、ブロック解析、整形ライブラリ。
+- `src/lib.rs`: 整形ライブラリの公開API。
+- `src/encoding.rs`, `src/lexer.rs`, `src/parser.rs`: 文字コードの検証、字句解析、ブロック解析。
+- `src/document.rs`, `src/formatter.rs`: 借用可能なトークン中間表現と整形パス。
+- `src/options.rs`, `src/config.rs`, `src/error.rs`: 公開オプション、設定解析・探索、位置付きエラー。
 - `src/main.rs`: CLI、入出力、`--check`、`--write`。
 - `src/bin/corpus.rs`: 指定したHSPソース群の不変条件を検証するツール。
-- `tests/golden.rs`: `cargo test` で実行される統合テスト。
+- `tests/golden.rs`, `tests/library.rs`: `cargo test` で実行される統合テストとライブラリAPIテスト。
 - `test/run_tests.py`: 言語中立なゴールデンテストランナー。
 - `test/cases/`: 個別テストケース群。
 - `test/corpus_snapshot.py`: コーパススナップショット検証ツール。

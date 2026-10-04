@@ -152,32 +152,60 @@ C++実装をRustで再実装し、C++実装を廃止する。現在の利用形�
 ### 完了条件
 
 - [x] ゴールデンケース（459/459 PASSED）、コーパス比較（1956/1956 PASSED）、統合テスト（`test/integration.sh` PASSED）がRust版で通る。
-  - 差し替え後のケース追加により、現在は 462/462（461ケース + 振る舞いテスト）。
+  - 差し替え後のケース追加により、段階3完了時は 462/462（461ケース + 振る舞いテスト）。
   - `test/integration_chsp.sh` はcHSP環境がある場合に実行する（未実施の場合はその旨を記録する）。
 - [x] 差分ファジングを5,000回実行し、不一致がない。
 - [x] リポジトリにC++実装が残っていない。
 
 ## 段階4: C++移植由来のひずみの除去
 
-### 作業（候補）
+### 実施内容
 
-- [ ] 文字列から文字列への多段パスと再lexをやめ、行またはトークンベースの中間表現に統一する
-  - 文字コードは `format()` の入口で一度だけ判定し、内部パスには判定済みの値を渡す（現状は各パスが `Options` 経由で受け取る）
-- [ ] `src/lib.rs` を `encoding`、`lexer`、`parser`、`formatter` などのモジュールに分割する
-- [ ] `Error` の行番号0（行番号なし）を `Option` で表す
-- [ ] `Item` が文字列をコピーしている箇所を、ソースのスライス参照に置き換える
-- [ ] `State` の整数フラグ（行番号とフラグを兼ねる `chsp_module` など）を、enumや `Option` で表す
-- [ ] 必要ならCLIをclapなどへ移行する。エラー文言が変わる場合は、契約に照らして意図した変更として
-  ゴールデンを更新する
-- [ ] 公開APIを整える（次節「IDE組み込みへの備え」）
-  - 内部パス（`normalize_full_width_spaces`、`rewrite_comments`、`declaration_layout`）は非公開化済み。
-    `detect_encoding` と `lex` は `hspfmt_corpus` と `--roundtrip` が使うため公開のまま
-- [ ] `--write` で置換後に親ディレクトリを同期し、電源断時の耐久性を高める（Unix）
-- [ ] `cargo clippy --all-targets -- -D warnings` をCIに加えるか決める（現状は警告0）
+- [x] 各パスの入力と出力を、借用可能なトークン列 `Document` に統一する
+  - 全角スペース正規化、コメント変換、行内整形、複数行 `short_if`、宣言前の空行調整は、
+    ソース全体のバイト列への書き出し・再lexを挟まずにトークンを受け渡す。
+  - 文字コードは入口で一度だけ解決し、`Auto` を持たない内部型 `ResolvedEncoding` を渡す。
+  - 安全性のため、行内整形結果のトークン境界照合は残す。
+    正規化で分割されたWordと隣接トークンも、小数・指数表記等へ分類するため局所的にlexする。
+- [x] `src/lib.rs` を `encoding`、`lexer`、`parser`、`formatter`、`document`、
+  `options`、`config`、`error`、`util` に分割する
+- [x] `Error::line()` と `Error::new()` の行番号を `Option<usize>` にする
+  - 行番号は1始まり、位置なしは `None`。`byte_offset()` は0始まりの入力バイト位置を返す。
+    字句エラーは検出位置、構造エラーは該当する原文行の先頭、設定エラーはオプションの先頭。
+- [x] `Item` のテキストと空白を `Cow<[u8]>` にし、未変更部分は原文を借用する
+- [x] `State` の関数・ラベル状態をbool、cHSP開始行を `Option<usize>` にする
+  - プリプロセッサの分岐状態も `Option<State>` にし、別の整数・有効フラグを持たない。
+- [x] CLIの解析方式を検討し、標準ライブラリによる現行方式を維持する
+  - clapの導入は不要。外部依存ゼロと既存のCLIエラー文言を維持する。
+- [x] IDE組み込みに備えた公開APIを用意する
+  - `format_utf8(&str, ...) -> Result<String, Error>` はUTF-8を明示して処理する。
+  - `Diagnostic` は警告種別、原文の行番号・行先頭バイト位置・行プレビューを返す。
+  - `Options`、`config::parse_config`、`config::parse_formatting_option`、`config::find_config` を公開する。
+    設定探索はカレントディレクトリを引数で受け取り、存在確認を呼び出し元へ委譲し、
+    ライブラリ自体はファイルI/Oを行わない。
+  - 内部パスは非公開。`detect_encoding` と `lex` は引き続き公開する。
+- [x] Unixの `--write` で置換後に親ディレクトリを同期する
+  - パーミッションも一時ファイルの同期前に設定する。
+  - 置換後の同期失敗は「置換済み」を明記して終了ステータス2にする。
+    置換前の失敗時の原文保持と無変更時の無書き込みは維持する。
+- [x] stableのCIに `cargo fmt --check` と `cargo clippy --all-targets -- -D warnings` を追加する
+  - Linux stableのCIには `cargo check --lib --target wasm32-unknown-unknown` も追加する。
 
-### 完了条件
+### 完了条件と検証結果
 
-- ゴールデンケースとコーパス比較が通る。変更した期待値はすべて理由を記録済み。
+- [x] ゴールデンとCLI振る舞いテスト: **464/464 PASSED**（463ケース + 振る舞いテスト）。
+  既存の期待値は変更していない。UTF-8/BOM/CRLFとCP932の複合変換ケース2件を追加し、
+  期待値は段階3のバイナリで作成した。
+- [x] ライブラリAPIテスト5件、テスト資産のトークン不変性・冪等性検証が成功。
+- [x] コーパススナップショット: **1956/1956 PASSED**。
+- [x] 段階3のRustバイナリとの差分ファジング: **5,000回 PASSED**。
+  追加のUTF-8/CP932複合入力2,000件も一致。
+- [x] OpenHSP統合テストとcHSP統合テスト（plugin/Cの両モード）が成功。
+- [x] `cargo build --release`、`cargo test --release`、`cargo fmt --check`、
+  `cargo clippy --all-targets -- -D warnings` が成功。
+
+ローカルにはwasm32とRust 1.70のツールチェーンがないため、これらのビルドは未実施。
+CIでwasm32、Rust 1.70、Windowsを検証する。
 
 ## IDE組み込みへの備え
 

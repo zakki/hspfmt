@@ -57,7 +57,8 @@ target/release/hspfmt --config=.hspfmt.example script.hsp
 - **`--check`**: 整形差分がなければ `0`、差分があれば `1`、エラー時は `2` を返します。
 - **`--write`, `-w`**: 整形結果で元ファイルを直接置換します。差分がない場合はファイルに触れず、タイムスタンプを維持します。成功時は `0` を返します。
 
-`--write` はシンボリックリンクとハードリンクを拒否し、UnixのパーミッションとWindowsのACLを保持します。ファイルパスはOSの文字列表現のまま扱うため、UnixのUTF-8以外のファイル名も指定できます。
+`--write` はシンボリックリンクとハードリンクを拒否し、UnixのパーミッションとWindowsのACLを保持します。Unixでは置換後に親ディレクトリも同期します。
+置換後の同期に失敗した場合は、置換済みである旨のエラーを表示し、終了コード `2` を返します。ファイルパスはOSの文字列表現のまま扱うため、UnixのUTF-8以外のファイル名も指定できます。
 
 設定ファイルのオプションはASCIIで記述します。`#` または `;` で始まるコメント行には、UTF-8/CP932の日本語を記述できます。
 
@@ -100,6 +101,32 @@ target/release/hspfmt --config=.hspfmt.example script.hsp
 | `--encoding=auto\|utf8\|cp932` | 入力文字エンコーディングの検証・文字境界処理（自動判定／UTF-8／CP932） | `auto` |
 | `--full-width-spaces=preserve\|normalize` | 全角スペース（U+3000）を維持／半角スペースへ正規化 | `preserve` |
 | `--roundtrip` | 字句解析した全トークンを無変更で連結して出力（デバッグ用） | 無効 |
+
+---
+
+## Rustライブラリとして使う
+
+```rust
+use hspfmt::{config::parse_config, format_utf8, Options};
+
+let mut options = Options::default();
+parse_config(b"indent=2\n", &mut options)?;
+let mut diagnostics = Vec::new();
+let result = format_utf8("repeat\nmes 1\nloop\n", &options, Some(&mut diagnostics))?;
+```
+
+UTF-8入力には `format_utf8(&str, ...)`、CP932や自動判定を使う入力には
+`format(&[u8], ...)` を使います。`format_utf8` は `Options::encoding` をUTF-8に上書きして処理します。
+ライブラリはファイルI/Oや標準出力への書き込みを行いません。
+
+`Error::line()` は1始まりの行番号を `Option<usize>` で返します（位置なしは `None`）。
+`Error::byte_offset()` は0始まりのバイト位置を返します。構造エラーでは該当行の先頭を指します。
+`Diagnostic` には警告種別 `kind`、行番号 `line`、原文行の先頭位置 `byte_offset`、
+改行を除いた原文 `source` が含まれます。
+
+設定の解析と探索は `config::parse_config`、`config::parse_formatting_option`、
+`config::find_config` を使えます。`find_config` には探索ディレクトリと存在確認関数を渡し、
+ファイルの読み込みは呼び出し元が行います。探索の優先順位はCLIと同じです。
 
 ---
 
