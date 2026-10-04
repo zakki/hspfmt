@@ -131,9 +131,13 @@ fn replace_file(path: &Path, output: &[u8]) -> Result<(), String> {
         let rand_val =
             (now.wrapping_mul(6364136223846793005) ^ (pid as u128)).wrapping_add(attempt as u128);
         let candidate = parent.join(format!(".hspfmt-{}", rand_val as u32));
-        if fs::create_dir(&candidate).is_ok() {
-            directory = candidate;
-            break;
+        match fs::create_dir(&candidate) {
+            Ok(()) => {
+                directory = candidate;
+                break;
+            }
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(format!("cannot create temporary directory: {}", e)),
         }
     }
 
@@ -320,13 +324,15 @@ fn load_config(path: &Path, options: &mut Options) -> Result<(), String> {
         if trimmed.is_empty() || trimmed.starts_with(b"#") || trimmed.starts_with(b";") {
             continue;
         }
-        let trimmed = std::str::from_utf8(trimmed).map_err(|_| {
-            format!(
+        if !trimmed.is_ascii() {
+            return Err(format!(
                 "{}:{}: config options must be ASCII",
                 path.display(),
                 line_idx + 1
-            )
-        })?;
+            ));
+        }
+        // ASCII is valid UTF-8.
+        let trimmed = std::str::from_utf8(trimmed).unwrap();
         let opt = if trimmed.starts_with("--") {
             trimmed.to_string()
         } else {
@@ -347,8 +353,10 @@ fn load_config(path: &Path, options: &mut Options) -> Result<(), String> {
     Ok(())
 }
 
-fn print_help() {
-    print!(
+fn print_help() -> io::Result<()> {
+    let mut stdout = io::stdout().lock();
+    write!(
+        stdout,
         "Usage: hspfmt [options] [file...|-]\n\
          Writes formatted source to stdout unless --write is specified.\n  \
          --write, -w          Replace the input file(s) in place (no stdout)\n  \
@@ -381,7 +389,8 @@ fn print_help() {
          --blank-lines-before-defcfunc=N|preserve (0..16)\n  \
          --encoding=auto|utf8|cp932 (default: auto; bytes are preserved)\n\
          Exit 2 indicates an input, syntax, option, or output error.\n"
-    );
+    )?;
+    stdout.flush()
 }
 
 fn run() -> Result<i32, (Option<String>, String, Option<usize>)> {
@@ -402,7 +411,7 @@ fn run() -> Result<i32, (Option<String>, String, Option<usize>)> {
             break;
         }
         if arg == "--help" {
-            print_help();
+            print_help().map_err(|_| (None, "output write failed".to_string(), None))?;
             return Ok(0);
         } else if arg == "--no-config" {
             no_config = true;

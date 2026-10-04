@@ -276,6 +276,18 @@ def run_behavioral_tests(formatter, verbose=False):
                 failures.append(f"/dev/full: expected exit 2, got {proc.returncode}")
             if b"output write failed" not in proc.stderr:
                 failures.append(f"/dev/full: expected 'output write failed', got {proc.stderr}")
+            proc = subprocess.run(
+                f'"{formatter}" --help > /dev/full',
+                shell=True,
+                cwd=td,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            if proc.returncode != 2 or proc.stderr != b"hspfmt: output write failed\n":
+                failures.append(
+                    f"--help to /dev/full: expected exit 2 and output write failure, "
+                    f"got {proc.returncode}: {proc.stderr}"
+                )
 
         # 5. Successful --write modifies file correctly
         to_modify = td / "to_modify.hsp"

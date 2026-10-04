@@ -44,6 +44,10 @@ fn main() {
     }
     // Sort files for deterministic order
     target_files.sort();
+    if target_files.is_empty() {
+        eprintln!("hspfmt_corpus: no .hsp, .as, or .chsp files found");
+        process::exit(2);
+    }
 
     let mut files = 0usize;
     let mut rejected = 0usize;

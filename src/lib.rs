@@ -1,5 +1,8 @@
 //! hspfmt library - Pre-macro HSP formatter in Rust.
 
+// Index loops mirror the original C++ passes and are often used with neighbouring indices.
+#![allow(clippy::needless_range_loop)]
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Encoding {
     Auto,
@@ -180,7 +183,7 @@ fn lower(s: &[u8]) -> Vec<u8> {
 }
 
 fn one_of(s: &[u8], values: &[&[u8]]) -> bool {
-    values.iter().any(|&v| v == s)
+    values.contains(&s)
 }
 
 fn fail(s: &[u8], pos: usize, message: &str) -> Error {
@@ -188,12 +191,8 @@ fn fail(s: &[u8], pos: usize, message: &str) -> Error {
     let limit = pos.min(s.len());
     let mut i = 0;
     while i < limit {
-        if s[i] == b'\n' {
+        if s[i] == b'\n' || (s[i] == b'\r' && (i + 1 >= s.len() || s[i + 1] != b'\n')) {
             line += 1;
-        } else if s[i] == b'\r' {
-            if i + 1 >= s.len() || s[i + 1] != b'\n' {
-                line += 1;
-            }
         }
         i += 1;
     }
@@ -317,27 +316,21 @@ pub fn detect_encoding(s: &[u8]) -> Result<Encoding, Error> {
     ))
 }
 
+// `encoding` must already be resolved; callers detect Auto once per source.
 fn character_end(s: &[u8], i: usize, encoding: Encoding) -> Result<usize, Error> {
-    let enc = if encoding == Encoding::Auto {
-        detect_encoding(s)?
-    } else {
-        encoding
-    };
+    debug_assert_ne!(encoding, Encoding::Auto);
     let c = s[i];
     if c < 128 {
         return Ok(i + 1);
     }
-    if enc == Encoding::Cp932 {
+    if encoding == Encoding::Cp932 {
         if (0xa1..=0xdf).contains(&c) {
             return Ok(i + 1);
         }
-        if (0x81..=0x9f).contains(&c) || (0xe0..=0xfc).contains(&c) {
-            if i + 1 < s.len() {
-                let next = s[i + 1];
-                if ((0x40..=0x7e).contains(&next) || (0x80..=0xfc).contains(&next)) && next != 0x7f
-                {
-                    return Ok(i + 2);
-                }
+        if ((0x81..=0x9f).contains(&c) || (0xe0..=0xfc).contains(&c)) && i + 1 < s.len() {
+            let next = s[i + 1];
+            if ((0x40..=0x7e).contains(&next) || (0x80..=0xfc).contains(&next)) && next != 0x7f {
+                return Ok(i + 2);
             }
         }
         return Err(fail(
@@ -550,7 +543,7 @@ fn source_lines<'a>(source: &'a [u8], tokens: &[Token]) -> Vec<SourceLine<'a>> {
     lines
 }
 
-pub fn normalize_full_width_spaces(source: &[u8], encoding: Encoding) -> Result<Vec<u8>, Error> {
+fn normalize_full_width_spaces(source: &[u8], encoding: Encoding) -> Result<Vec<u8>, Error> {
     let tokens = lex(source, encoding)?;
     let lines = source_lines(source, &tokens);
     let full_space: &[u8] = if encoding == Encoding::Cp932 {
@@ -626,7 +619,7 @@ pub fn normalize_full_width_spaces(source: &[u8], encoding: Encoding) -> Result<
     Ok(out)
 }
 
-pub fn rewrite_comments(source: &[u8], options: &Options) -> Result<Vec<u8>, Error> {
+fn rewrite_comments(source: &[u8], options: &Options) -> Result<Vec<u8>, Error> {
     if options.comment_style == CommentStyle::Preserve
         && options.block_comments == BlockComments::Preserve
     {
@@ -751,7 +744,7 @@ pub fn rewrite_comments(source: &[u8], options: &Options) -> Result<Vec<u8>, Err
     Ok(out)
 }
 
-pub fn declaration_layout(source: &[u8], options: &Options) -> Result<Vec<u8>, Error> {
+fn declaration_layout(source: &[u8], options: &Options) -> Result<Vec<u8>, Error> {
     if options.preserve_indent
         && options.blank_lines_before_module < 0
         && options.blank_lines_before_deffunc < 0
@@ -1609,7 +1602,7 @@ fn print_items(
                 expected = [b"%", &expected[2..]].concat();
             }
         }
-        if token.kind != items[index].kind || &out[token.begin..token.end] != expected {
+        if token.kind != items[index].kind || out[token.begin..token.end] != expected {
             return Err(Error::new(0, "spacing changed token boundaries"));
         }
         index += 1;
@@ -1662,7 +1655,7 @@ fn short_if(items: Vec<Item>, options: &Options, indent_size: usize) -> Result<V
         }
     }
     let mut start = open + 1;
-    for i in start..items.len() {
+    for i in (open + 1)..items.len() {
         if items[i].text == b"{" {
             return Ok(items);
         }
@@ -1883,10 +1876,9 @@ pub fn lex(s: &[u8], encoding: Encoding) -> Result<Vec<Token>, Error> {
                 let c = s[i];
                 if digit(c)
                     || c == b'_'
-                    || (hex && ((b'a'..=b'f').contains(&c) || (b'A'..=b'F').contains(&c)))
+                    || (hex && c.is_ascii_hexdigit())
+                    || (!hex && !bin && c == b'.' && i + 1 < s.len() && digit(s[i + 1]))
                 {
-                    i += 1;
-                } else if !hex && !bin && c == b'.' && i + 1 < s.len() && digit(s[i + 1]) {
                     i += 1;
                 } else if !hex && !bin && (c == b'e' || c == b'E') {
                     i += 1;

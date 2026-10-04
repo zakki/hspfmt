@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+"""Differential fuzzer comparing two hspfmt executables.
+
+The baseline is usually a build of an earlier revision, e.g. the last C++
+implementation (commit 28d57e4) or a previous Rust release. Stdout, stderr,
+and exit status must match for random inputs and options.
+"""
 import os
 import random
 import string
@@ -98,52 +104,52 @@ def generate_random_options():
         opts.append("--roundtrip")
     return opts
 
-def run_fuzz(cpp_bin, rust_bin, iterations=2000):
-    print(f"Running {iterations} differential fuzzing iterations between C++ and Rust...")
+def run_fuzz(baseline_bin, candidate_bin, iterations=2000):
+    print(f"Running {iterations} differential fuzzing iterations between baseline and candidate...")
     for i in range(1, iterations + 1):
         source = generate_random_source()
         options = generate_random_options()
 
-        # Run C++
-        p_cpp = subprocess.run(
-            [cpp_bin, "--no-config"] + options,
+        # Run baseline
+        p_base = subprocess.run(
+            [baseline_bin, "--no-config"] + options,
             input=source,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
 
-        # Run Rust
-        p_rust = subprocess.run(
-            [rust_bin, "--no-config"] + options,
+        # Run candidate
+        p_cand = subprocess.run(
+            [candidate_bin, "--no-config"] + options,
             input=source,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
 
         # Check returncode
-        if p_cpp.returncode != p_rust.returncode:
+        if p_base.returncode != p_cand.returncode:
             print(f"FAIL at iteration {i}: exit code mismatch!")
             print(f"Options: {options}")
-            print(f"C++ code: {p_cpp.returncode}, Rust code: {p_rust.returncode}")
-            print(f"C++ stderr:\n{p_cpp.stderr.decode('utf-8', errors='replace')}")
-            print(f"Rust stderr:\n{p_rust.stderr.decode('utf-8', errors='replace')}")
+            print(f"Baseline code: {p_base.returncode}, candidate code: {p_cand.returncode}")
+            print(f"Baseline stderr:\n{p_base.stderr.decode('utf-8', errors='replace')}")
+            print(f"Candidate stderr:\n{p_cand.stderr.decode('utf-8', errors='replace')}")
             return False
 
         # If success, check stdout
-        if p_cpp.returncode == 0:
-            if p_cpp.stdout != p_rust.stdout:
+        if p_base.returncode == 0:
+            if p_base.stdout != p_cand.stdout:
                 print(f"FAIL at iteration {i}: stdout mismatch on success!")
                 print(f"Options: {options}")
-                print(f"C++ stdout ({len(p_cpp.stdout)} bytes): {p_cpp.stdout!r}")
-                print(f"Rust stdout ({len(p_rust.stdout)} bytes): {p_rust.stdout!r}")
+                print(f"Baseline stdout ({len(p_base.stdout)} bytes): {p_base.stdout!r}")
+                print(f"Candidate stdout ({len(p_cand.stdout)} bytes): {p_cand.stdout!r}")
                 return False
 
         # Check stderr
-        if p_cpp.stderr != p_rust.stderr:
+        if p_base.stderr != p_cand.stderr:
             print(f"FAIL at iteration {i}: stderr mismatch!")
             print(f"Options: {options}")
-            print(f"C++ stderr:\n{p_cpp.stderr.decode('utf-8', errors='replace')}")
-            print(f"Rust stderr:\n{p_rust.stderr.decode('utf-8', errors='replace')}")
+            print(f"Baseline stderr:\n{p_base.stderr.decode('utf-8', errors='replace')}")
+            print(f"Candidate stderr:\n{p_cand.stderr.decode('utf-8', errors='replace')}")
             return False
 
         if i % 500 == 0:
@@ -153,8 +159,11 @@ def run_fuzz(cpp_bin, rust_bin, iterations=2000):
     return True
 
 if __name__ == "__main__":
-    cpp_bin = sys.argv[1] if len(sys.argv) > 1 else "build/hspfmt"
-    rust_bin = sys.argv[2] if len(sys.argv) > 2 else "target/release/hspfmt"
+    if len(sys.argv) < 2:
+        print("Usage: diff_fuzz.py BASELINE [CANDIDATE [ITERATIONS]]", file=sys.stderr)
+        sys.exit(2)
+    baseline_bin = sys.argv[1]
+    candidate_bin = sys.argv[2] if len(sys.argv) > 2 else "target/release/hspfmt"
     iterations = int(sys.argv[3]) if len(sys.argv) > 3 else 3000
-    if not run_fuzz(cpp_bin, rust_bin, iterations):
+    if not run_fuzz(baseline_bin, candidate_bin, iterations):
         sys.exit(1)

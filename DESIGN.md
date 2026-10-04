@@ -173,7 +173,7 @@ for diag in diagnostics {
 
 ```mermaid
 flowchart TD
-    A["単体テスト (CTest)<br/>期待値・回帰・エラー拒否"] --> B["コーパス検証 (hspfmt_corpus)<br/>大量ソースの不変条件・冪等性"]
+    A["ゴールデンテスト (cargo test)<br/>期待値・回帰・エラー拒否"] --> B["コーパス検証 (hspfmt_corpus)<br/>大量ソースの不変条件・冪等性"]
     B --> C["OpenHSP統合テスト (integration.sh)<br/>コンパイル・実行バイトコード比較"]
     C --> D["cHSP統合テスト (integration_chsp.sh)<br/>native/plugin出力検証"]
 ```
@@ -198,6 +198,16 @@ flowchart TD
 
 ```sh
 cargo run --release --bin hspfmt_corpus /path/to/OpenHSP/sample
+```
+
+対象ファイルが1件も見つからない場合は終了ステータス2で失敗します。
+
+### 差分ファジング (diff_fuzz.py)
+
+`test/diff_fuzz.py` は、基準となる別リビジョンのビルドと現在のビルドへ同じランダム入力・オプションを与え、標準出力・標準エラー出力・終了ステータスの一致を検証します。振る舞いを変えないリファクタリングの確認に使います。
+
+```sh
+python3 test/diff_fuzz.py /path/to/baseline/hspfmt target/release/hspfmt 5000
 ```
 
 ### OpenHSP連携統合テスト (integration.sh)

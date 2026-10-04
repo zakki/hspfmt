@@ -1,5 +1,5 @@
 #!/bin/sh
-# Optional Linux integration test; independent of the regular build and CTest.
+# Optional Linux integration test; independent of the regular build and cargo test.
 set -eu
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 formatter=${1:-"$repo/target/release/hspfmt"}
