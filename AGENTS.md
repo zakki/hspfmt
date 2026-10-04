@@ -1,18 +1,20 @@
 # hspfmt 開発ガイド
 
-このリポジトリは、マクロ展開前のHSPソースを整形するC++17製のライブラリとCLIです。OpenHSPから独立してビルドできます。
+このリポジトリは、マクロ展開前のHSPソースを整形するRust製のライブラリとCLIです。OpenHSPから独立してビルドできます。
 
 ## 構成
 
 - `README.md`: 概要、インストール・ビルド方法、CLIオプション一覧、ライセンス。
 - `CONFIGURATION.md`: 設定ファイル・プリセット・各オプションの詳細と実例（Before/After）。
 - `DESIGN.md`: 設計思想、構文解析と制約、安全性、テスト戦略。
-- `src/hspfmt.h`: 字句解析・整形APIとオプション。
-- `src/hspfmt.cpp`: 文字コードの検証、字句解析、ブロック解析、整形。
-- `src/main.cpp`: CLI、入出力、`--check`、`--write`。
-- `src/CMakeLists.txt`: ビルドとCTestの定義。CMakeのソースディレクトリは `src/`。
-- `test/test_hspfmt.cpp`: 期待出力、ソース再現、冪等性、エラーの回帰テスト。
-- `test/corpus.cpp`: 指定したHSPソース群の不変条件を検証するツール。
+- `Cargo.toml`: Cargoパッケージ定義（ライブラリおよびバイナリ）。
+- `src/lib.rs`: 文字コードの検証、字句解析、ブロック解析、整形ライブラリ。
+- `src/main.rs`: CLI、入出力、`--check`、`--write`。
+- `src/bin/corpus.rs`: 指定したHSPソース群の不変条件を検証するツール。
+- `tests/golden.rs`: `cargo test` で実行される統合テスト。
+- `test/run_tests.py`: 言語中立なゴールデンテストランナー。
+- `test/cases/`: 個別テストケース群。
+- `test/corpus_snapshot.py`: コーパススナップショット検証ツール。
 - `test/integration.sh`: 外部のOpenHSPツールでコンパイル・実行結果を比較するLinux用テスト。
 
 ## ビルドと検証
@@ -20,13 +22,10 @@
 リポジトリのルートで実行します。
 
 ```sh
-cmake -S src -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release
-ctest --test-dir build -C Release --output-on-failure
-build/hspfmt_corpus test
+cargo build --release
+cargo test --release
+cargo run --release --bin hspfmt_corpus test
 ```
-
-テストは既定の `BUILD_TESTING=ON` でビルドします。CLIだけをビルドする場合は `-DBUILD_TESTING=OFF` を指定します。複数構成ジェネレータでは実行ファイルを `build/Release/` から実行します。
 
 CLIや構文変換を変更した場合は、利用可能なOpenHSP環境で統合テストも実行します。
 
@@ -41,11 +40,11 @@ sh test/integration.sh
 
 ## 変更時の方針
 
-- C++17と標準ライブラリを使い、既存の4スペースインデントと命名に合わせます。
+- Rustと標準ライブラリを使い、既存のフォーマットと命名に合わせます。
 - 通常のビルド・テストを他リポジトリやHSPランタイムに依存させないでください。外部ソース群とOpenHSPは追加検証用です。
 - UTF-8/CP932のバイト境界、BOM、CRLF/LF、末尾改行の有無、コメントと文字列の内容を保持します。符号化変換は行いません。
 - 通常整形のトークン不変性と冪等性を維持します。意図的な構文変換は対応するオプションで有効にします。
 - マクロ展開や完全なHSPコンパイラとしての解析は行いません。対応外の構造を推測で修復しないでください。
-- 整形規則の変更には `test/test_hspfmt.cpp` の回帰ケースを追加します。CLIオプションや制約の変更は `README.md` にも反映します。
+- 整形規則の変更には `test/cases/` にゴールデンケースを追加します。CLIオプションや制約の変更は `README.md` にも反映します。
 - `--write` の変更では、置換前の書き込み完了、失敗時の原文保持、変更がない場合の無書き込みを維持します。
 - ビルド生成物をコミットせず、`LICENSE` の著作権表示と条件を保持してください。

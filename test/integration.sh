@@ -2,7 +2,7 @@
 # Run from any directory. Requires a built hspfmt, GNU coreutils and OpenHSP.
 set -eu
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-formatter=${1:-"$repo/build/hspfmt"}
+formatter=${1:-"$repo/target/release/hspfmt"}
 case "$formatter" in
     /*) ;;
     *) formatter="$(pwd)/$formatter" ;;

@@ -17,14 +17,14 @@
 - [HSP構文の曖昧性と診断警告](#hsp構文の曖昧性と診断警告)
   - [ラベル引数 vs 乗算代入 (`foo *bar`)](#ラベル引数-vs-乗算代入-foo-bar)
   - [配列代入 vs 命令呼び出し (`foo (a)=b`)](#配列代入-vs-命令呼び出し-foo-ab)
-  - [C++ API での診断情報の取得](#c-api-での診断情報の取得)
+  - [Rust API での診断情報の取得](#rust-api-での診断情報の取得)
 - [安全なファイル更新機構 (`--write`)](#安全なファイル更新機構---write)
   - [アトミックな置換手順](#アトミックな置換手順)
   - [無変更時のタイムスタンプ維持](#無変更時のタイムスタンプ維持)
   - [一括処理時の安全性担保](#一括処理時の安全性担保)
   - [リンクおよびアクセス権限の保護](#リンクおよびアクセス権限の保護)
 - [テストと品質保証戦略](#テストと品質保証戦略)
-  - [単体テスト (CTest)](#単体テスト-ctest)
+  - [ゴールデンケースと単体テスト (cargo test)](#ゴールデンケースと単体テスト-cargo-test)
   - [コーパス検証ツール (hspfmt_corpus)](#コーパス検証ツール-hspfmt_corpus)
   - [OpenHSP連携統合テスト (integration.sh)](#openhsp連携統合テスト-integrationsh)
   - [cHSP統合テスト (integration_chsp.sh)](#chsp統合テスト-integration_chspsh)
@@ -41,7 +41,7 @@
 
 ### 独立性と移植性
 
-`hspfmt` はOpenHSPのコンパイラやランタイムライブラリに一切依存せず、C++17標準ライブラリのみで構築されています。Windows、Linux、macOSなどの主要な環境で単一のCMake手順からビルドでき、外部依存なしに自己完結して動作します。
+`hspfmt` はOpenHSPのコンパイラやランタイムライブラリに一切依存せず、Rust標準ライブラリのみ（外部依存ゼロ）で構築されています。Windows、Linux、macOSなどの主要な環境で単一のCargo手順からビルドでき、外部依存なしに自己完結して動作します。
 
 ### コンパイラではなくフォーマッタに徹する
 
@@ -119,23 +119,21 @@ hspfmt: script.hsp:10: warning: ambiguous '*' spacing preserved: foo *bar
 
 `hspfmt` は命令と変数の名前解決を行わないため、このような曖昧なケースでは文頭の識別子に続く最初の演算子の解釈を安全側に倒し、原文の意図を破壊しないよう慎重にトークンを配置します。
 
-### C++ API での診断情報の取得
+### Rust API での診断情報の取得
 
-C++ライブラリとして `hspfmt` を組み込む場合、診断情報（Diagnostics）を構造体ベクターとして受け取ることができます。
+Rustライブラリとして `hspfmt` を組み込む場合、診断情報（Diagnostics）をベクターとして受け取ることができます。
 
-```cpp
-#include "hspfmt.h"
-#include <vector>
+```rust
+use hspfmt::{format, Diagnostic, Options, Spacing};
 
-std::vector<hspfmt::Diagnostic> diagnostics;
-hspfmt::Options options;
-options.operator_spacing = hspfmt::Spacing::Space;
+let mut diagnostics = Vec::new();
+let mut options = Options::default();
+options.operator_spacing = Spacing::Space;
 
-std::string formatted = hspfmt::format(source, options, &diagnostics);
+let formatted = format(source, &options, Some(&mut diagnostics))?;
 
-for (const auto &diag : diagnostics) {
-    std::cerr << "Line " << diag.line << ": " << diag.message
-              << " in: " << diag.source << std::endl;
+for diag in diagnostics {
+    eprintln!("Line {}: warning: ambiguous label or multiplication; preserving whitespace", diag.line);
 }
 ```
 
@@ -180,9 +178,9 @@ flowchart TD
     C --> D["cHSP統合テスト (integration_chsp.sh)<br/>native/plugin出力検証"]
 ```
 
-### 単体テスト (CTest)
+### ゴールデンケースと単体テスト (cargo test)
 
-`test/test_hspfmt.cpp` は、すべてのオプション組み合わせ、境界条件、回帰バグ、文字コードの挙動を網羅した数百のテストケースを実行します。
+`test/cases/` 配下の個別テストケース群および `test/run_tests.py` は、すべてのオプション組み合わせ、境界条件、回帰バグ、文字コードの挙動を網羅した数百のテストケースを実行します（`cargo test` 経由でも自動実行されます）。
 各テストケースにおいて以下の不変条件を検証します。
 
 1. **ラウンドトリップ性**: `lex(input)` のトークン連結結果が `input` と1バイトの狂いもなく完全一致すること。
@@ -191,7 +189,7 @@ flowchart TD
 
 ### コーパス検証ツール (hspfmt_corpus)
 
-`test/corpus.cpp` は、指定されたディレクトリツリー内のすべてのHSPソース（`.hsp`, `.as`, `.chsp`）を再帰的に走査し、実世界の大量のコードに対して以下の不変条件を検証するツールです。
+`src/bin/corpus.rs` は、指定されたディレクトリツリー内のすべてのHSPソース（`.hsp`, `.as`, `.chsp`）を再帰的に走査し、実世界の大量のコードに対して以下の不変条件を検証するツールです。
 
 - **非空白トークンの完全一致**: 整形によってコードの意味（トークンの内容と順序）が変わっていないこと。
 - **冪等性**: すべてのファイルで2回目の整形で差分が出ないこと。
@@ -199,7 +197,7 @@ flowchart TD
 任意のオープンソースHSPプロジェクトやOpenHSP付属のサンプルコード群を引数に渡して即座に検証できます。
 
 ```sh
-build/hspfmt_corpus /path/to/OpenHSP/sample
+cargo run --release --bin hspfmt_corpus /path/to/OpenHSP/sample
 ```
 
 ### OpenHSP連携統合テスト (integration.sh)

@@ -151,14 +151,17 @@ def verify_snapshot(formatter, repo_root, snapshot_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Corpus snapshot tool for hspfmt")
-    parser.add_argument("--formatter", required=True, help="Path to hspfmt binary")
+    default_formatter = "target/release/hspfmt" if os.path.exists("target/release/hspfmt") else "target/debug/hspfmt"
+    parser.add_argument("--formatter", default=default_formatter, help="Path to hspfmt binary")
     parser.add_argument("--snapshot", default="test/corpus_snapshot.json", help="Path to snapshot JSON file")
     parser.add_argument("--record", action="store_true", help="Record snapshot instead of verifying")
     parser.add_argument("corpus_paths", nargs="*", help="Optional corpus paths")
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parent.parent
-    formatter = Path(args.formatter).resolve()
+    formatter = Path(args.formatter)
+    if not formatter.is_absolute():
+        formatter = repo_root / formatter
     if not formatter.is_file():
         print(f"Error: formatter not found: {formatter}", file=sys.stderr)
         sys.exit(2)

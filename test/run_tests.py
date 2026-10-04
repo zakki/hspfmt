@@ -16,8 +16,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Run golden test cases for hspfmt.")
     parser.add_argument(
         "--formatter",
-        required=True,
-        help="Path to the hspfmt executable",
+        default="target/release/hspfmt" if os.path.exists("target/release/hspfmt") else "target/debug/hspfmt",
+        help="Path to the hspfmt executable (default: target/release/hspfmt or target/debug/hspfmt)",
     )
     parser.add_argument(
         "test_dirs",

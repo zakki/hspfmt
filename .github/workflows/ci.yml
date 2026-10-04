@@ -18,11 +18,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            configure_args: ""
-            corpus: ./build/hspfmt_corpus
           - os: windows-latest
-            configure_args: -A x64 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
-            corpus: ./build/Release/hspfmt_corpus.exe
     defaults:
       run:
         shell: bash
@@ -33,34 +29,31 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Configure
-        run: cmake -S src -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON ${{ matrix.configure_args }}
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Build
-        run: cmake --build build --config Release --parallel
+        run: cargo build --release
 
       - name: Test
-        run: ctest --test-dir build -C Release --output-on-failure --no-tests=error
-
-      - name: Check corpus invariants
-        run: ${{ matrix.corpus }} test
+        run: cargo test --release
 
       - name: Stage Windows package
         if: runner.os == 'Windows'
         run: |
-          cmake -E make_directory build/package
-          cmake -E copy build/Release/hspfmt.exe README.md CONFIGURATION.md DESIGN.md LICENSE .hspfmt.example build/package/
-          cmake -E copy_directory presets build/package/presets
+          mkdir -p package/presets
+          cp target/release/hspfmt.exe README.md CONFIGURATION.md DESIGN.md LICENSE .hspfmt.example package/
+          cp -r presets/* package/presets/
 
       - name: Create Windows ZIP
         if: runner.os == 'Windows'
-        working-directory: build/package
-        run: cmake -E tar cf ../hspfmt-windows-x64.zip --format=zip -- hspfmt.exe README.md CONFIGURATION.md DESIGN.md LICENSE .hspfmt.example presets
+        working-directory: package
+        run: 7z a ../hspfmt-windows-x64.zip hspfmt.exe README.md CONFIGURATION.md DESIGN.md LICENSE .hspfmt.example presets
 
       - name: Upload Windows ZIP
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v7
         with:
-          path: build/hspfmt-windows-x64.zip
+          path: hspfmt-windows-x64.zip
           archive: false
           if-no-files-found: error

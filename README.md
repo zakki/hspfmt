@@ -1,24 +1,29 @@
 # hspfmt — HSP formatter
 
-HSP（Hot Soup Processor）およびcHSPのマクロ展開前のソースコードを整形する、C++17製の高速なCLIフォーマッタです。
+HSP（Hot Soup Processor）およびcHSPのマクロ展開前のソースコードを整形する、Rust製の高速なフォーマッタライブラリおよびCLIです。
 外部ツールやランタイムに依存せず、CRLF/LFの改行形式や文字エンコーディング（UTF-8/CP932）を正確に保持しながらソースコードを安全に整形します。
 
 ## インストールとビルド
 
 ### ソースコードからのビルド
 
-CMake 3.16以上とC++17対応コンパイラが必要です。
+Rust 1.70以上（Cargo）が必要です。
 
 ```sh
-cmake -S src -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release
+cargo build --release
 ```
 
-Visual Studioなどの複数構成ジェネレータでは `build/Release/hspfmt.exe` に生成されます。テストツールのビルドを省く場合は `-DBUILD_TESTING=OFF` を指定してください。
+ビルドされた実行ファイルは `target/release/hspfmt` に生成されます。
+
+テストの実行:
+
+```sh
+cargo test --release
+```
 
 ### Windows用バイナリ (ZIP)
 
-GitHub Actionsの [CIワークフロー](.github/workflows/ci.yml) でビルドされたWindows 64bit用バイナリ（MSVC静的リンク版）をダウンロードできます。
+GitHub Actionsの [CIワークフロー](.github/workflows/ci.yml) でビルドされたWindows 64bit用バイナリをダウンロードできます。
 
 **Actions → CI → 対象のワークフロー実行 → Artifacts → hspfmt-windows-x64.zip**
 
@@ -30,19 +35,19 @@ ZIPには `hspfmt.exe`、`README.md`、`CONFIGURATION.md`、`DESIGN.md`、`LICEN
 
 ```sh
 # 標準出力へ整形結果を出力
-build/hspfmt script.hsp
+target/release/hspfmt script.hsp
 
 # ファイルを直接上書き更新
-build/hspfmt --write script.hsp
+target/release/hspfmt --write script.hsp
 
 # 整形差分の有無を検査（CI用）
-build/hspfmt --check script.hsp
+target/release/hspfmt --check script.hsp
 
 # 複数ファイルを一括更新
-build/hspfmt -w file1.hsp file2.hsp
+target/release/hspfmt -w file1.hsp file2.hsp
 
 # 設定ファイルを指定して実行
-build/hspfmt --config=.hspfmt.example script.hsp
+target/release/hspfmt --config=.hspfmt.example script.hsp
 ```
 
 ### 入出力と終了コード
