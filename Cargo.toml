@@ -1,0 +1,18 @@
+[package]
+name = "hspfmt"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "hspfmt"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hspfmt"
+path = "src/main.rs"
+
+[[bin]]
+name = "hspfmt_corpus"
+path = "src/bin/corpus.rs"
+
+[dependencies]
