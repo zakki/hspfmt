@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 3.16)
 project(hspfmt LANGUAGES CXX)
 
 if(MSVC)
-    add_compile_options(/W4)
+    # Read UTF-8 sources consistently, including non-ASCII test literals.
+    add_compile_options(/W4 /utf-8)
 else()
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
