@@ -129,6 +129,18 @@ UTF-8入力には `format_utf8(&str, ...)`、CP932や自動判定を使う入力
 `config::find_config` を使えます。`parse_config` はエラー時に `Options` を変更しません。`find_config` には探索ディレクトリと存在確認関数を渡し、
 ファイルの読み込みは呼び出し元が行います。探索の優先順位はCLIと同じです。
 
+### 0.2.0のAPI変更と互換性
+
+0.2.0でRust移行を完了しました。0.1.0からのAPI変更として、`Error::line()` の戻り値を
+`usize`（位置なしは0）から `Option<usize>`（位置なしは `None`）へ変更し、
+`Error::new` を非公開にしました。`Error::byte_offset()` と `Diagnostic` の `kind`・
+`byte_offset` フィールドを追加しています。`DiagnosticKind` のマッチにはワイルドカード分岐が必要です。
+`format_utf8` と上記の設定解析・探索APIも追加しました。
+
+`Options` は構造体リテラルと `..Options::default()` で構築できる公開構造体です。
+公開フィールドの追加も破壊的変更として扱い、0.xではマイナーバージョンを更新します。
+`#[non_exhaustive]` の `DiagnosticKind` には、互換性を保ったまま警告種別を追加できます。
+
 ---
 
 ## 関連ドキュメント
