@@ -1,0 +1,4 @@
+#deffunc f str p_path, int p_access, local p_tmp ; keep , comma
+    return
+#defcfunc local g double p_x, int p_y
+    return p_x + (p_y - 1)

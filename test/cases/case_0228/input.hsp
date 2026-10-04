@@ -1,0 +1,6 @@
+if z=0 {
+  return
+}
+if flag {
+x=1
+}

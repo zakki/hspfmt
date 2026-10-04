@@ -1,0 +1,5 @@
+	t1="":t2=""
+	mesbox t1,160,32,0		; aligned
+			; continuation
+*tmprt
+	objprm 0,t1		; aligned

@@ -1,0 +1,3 @@
+#define f x // stays
+x = 1 + \
+  2 // stays

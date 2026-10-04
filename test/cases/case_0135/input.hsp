@@ -1,0 +1,6 @@
+#deffunc f
+return
+; docs for g
+// second line
+#defcfunc g
+return 1

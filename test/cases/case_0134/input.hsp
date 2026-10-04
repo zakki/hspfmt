@@ -1,0 +1,4 @@
+#chsp_module
+
+#chsp_defcfunc f -> int
+return 1

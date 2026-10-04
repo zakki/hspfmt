@@ -1,0 +1,13 @@
+# 通常コードをタブ1段から始め、ループ本体も1段下げるスタイル。
+encoding=utf8
+indent=4
+tabs
+base-indent=1
+loop-indent=1
+no-indent-labels
+
+# 演算子・カンマ・コロンは空白なし。コメント前は1スペース。
+operator-spacing=compact
+comma-spacing=compact
+colon-spacing=compact
+comment-spacing=space

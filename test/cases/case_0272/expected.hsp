@@ -1,0 +1,6 @@
+	repeat 2
+	x = 1
+	if flag {
+		x = 2
+	}
+	loop

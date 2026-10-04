@@ -1,0 +1,4 @@
+--encoding=cp932
+--full-width-spaces=normalize
+--comment-style=c
+--block-comments=lines

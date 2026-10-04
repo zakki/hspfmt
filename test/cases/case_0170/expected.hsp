@@ -1,0 +1,3 @@
+custom@mod *lb1, 2*3, *lb2
+x=custom_value@mod(*lb1, 2*3, *lb2)
+product=x@mod*y@mod

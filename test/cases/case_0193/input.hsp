@@ -1,0 +1,6 @@
+; hspfmt: off
+custom_start
+x=1
+custom_end
+; hspfmt: on
+a=2

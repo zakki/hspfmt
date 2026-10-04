@@ -1,0 +1,6 @@
+#if A
+*one
+#else
+*two
+#endif
+    x = 1

@@ -1,0 +1,10 @@
+x=1
+*main
+repeat
+x=2
+loop
+#module m
+#deffunc f
+x=3
+#global
+x=4

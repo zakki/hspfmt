@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include <utility>
 
+#ifndef HSPFMT_TEST_HELPERS_CUSTOM
 namespace {
 unsigned count = 0;
 void expect(const std::string &input, const std::string &expected, hspfmt::Options options = {}) {
@@ -40,6 +41,7 @@ void diagnostic_cases(const std::string &input, const std::string &expected,
             throw std::runtime_error("wrong ambiguity source location: " + input);
 }
 }
+#endif
 
 int main() {
     try {

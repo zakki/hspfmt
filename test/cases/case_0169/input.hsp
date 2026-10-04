@@ -1,0 +1,3 @@
+custom *lb1,2*3,*lb2
+custom 2*3,*lb1
+x=custom_value(*lb1,custom_value(*lb2,2*3,*lb1),*lb2)+1

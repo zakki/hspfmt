@@ -1,0 +1,4 @@
+﻿#module m
+x = 1
+
+#deffunc f

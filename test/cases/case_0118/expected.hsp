@@ -1,0 +1,5 @@
+#chsp_module
+#chsp_deffunc f
+  return
+#chsp_end
+#chsp_module_end

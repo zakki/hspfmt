@@ -1,0 +1,9 @@
+	switch x
+		case 1
+			repeat 2
+			x = 1
+			loop
+			swbreak
+		default
+			x = 2
+	swend

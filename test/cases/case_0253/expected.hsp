@@ -1,0 +1,5 @@
+if flag {
+    return
+}
+; note
+else { x = 1 }

@@ -1,0 +1,2 @@
+if a { custom 1 }
+else { custom 2 }

@@ -1,0 +1,6 @@
+; hspfmt: ignore
+ repeat  2
+x=1
+; hspfmt: ignore
+  loop
+y=2

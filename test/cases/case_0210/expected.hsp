@@ -1,0 +1,5 @@
+; hspfmt: ignore
+s={"
+; hspfmt: ignore
+"}
+x = 1

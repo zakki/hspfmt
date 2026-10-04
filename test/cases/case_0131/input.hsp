@@ -1,0 +1,4 @@
+#chsp_module
+#if FLAG
+#chsp_deffunc f
+#endif

@@ -1,0 +1,4 @@
+#deffunc f
+	return
+	  ; docs
+#deffunc g int p_a, int p_b

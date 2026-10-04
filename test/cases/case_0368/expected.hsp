@@ -1,0 +1,5 @@
+; hspfmt: off
+a=b=c
+; hspfmt: on
+x=1 + \
+ a=b

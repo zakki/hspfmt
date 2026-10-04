@@ -1,0 +1,4 @@
+if flag { /* comment
+ still comment */
+x=1
+}

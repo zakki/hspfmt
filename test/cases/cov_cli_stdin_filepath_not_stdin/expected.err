@@ -1,0 +1,1 @@
+hspfmt: --stdin-filepath can only be used with stdin

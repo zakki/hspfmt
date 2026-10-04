@@ -1,0 +1,4 @@
+--short-if
+--condition-parens=add
+--operator-style=c
+--increment-style=c

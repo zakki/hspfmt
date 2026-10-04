@@ -1,0 +1,6 @@
+#deffunc f
+return
+; hspfmt: ignore
+  ; keep docs
+#deffunc g
+return

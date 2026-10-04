@@ -1,0 +1,12 @@
+x=1
+  ; module docs
+#chsp_module
+  ; function docs
+#chsp_deffunc f
+return
+#chsp_end
+  ; result docs
+#chsp_defcfunc g -> int
+return 1
+#chsp_end
+#chsp_module_end

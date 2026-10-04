@@ -1,0 +1,3 @@
+onclick gosub *click
+on n+1 goto *first, *second
+a=b*c

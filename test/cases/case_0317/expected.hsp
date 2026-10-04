@@ -1,0 +1,7 @@
+*main
+    x = 1
+#deffunc f
+*local
+    x = 2
+#global
+x = 3

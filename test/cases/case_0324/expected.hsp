@@ -1,0 +1,4 @@
+// hspfmt: off
+x=1 // kept
+// hspfmt: on
+x = 2 ; tail

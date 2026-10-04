@@ -1,0 +1,5 @@
+	*main
+	repeat 2
+ 	 a = 1
+	loop
+		; aligned

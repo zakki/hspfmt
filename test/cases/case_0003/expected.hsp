@@ -1,0 +1,4 @@
+#deffunc 加算 str 漢字, int ひらがな
+    return
+; 表
+#defcfunc next int 漢字, str ひらがな

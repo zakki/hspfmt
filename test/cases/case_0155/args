@@ -1,0 +1,5 @@
+--indent=preserve
+--tabs
+--base-indent=2
+--indent-labels
+--blank-lines-before-deffunc=1

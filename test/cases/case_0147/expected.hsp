@@ -1,0 +1,6 @@
+*first
+    x = 1
+/* docs
+    keep interior */
+*second
+    x = 2

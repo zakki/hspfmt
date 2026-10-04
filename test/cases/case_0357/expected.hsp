@@ -1,0 +1,6 @@
+x = 1
+
+; docs
+;more 
+#deffunc f
+    return

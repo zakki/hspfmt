@@ -1,0 +1,3 @@
+if e = 0 : uy--
+if flag : x += 2 : y++
+if z = 0 : return

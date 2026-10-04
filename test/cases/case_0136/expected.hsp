@@ -1,0 +1,6 @@
+#deffunc f
+    return
+/* docs
+    keep interior */
+#deffunc g
+    return

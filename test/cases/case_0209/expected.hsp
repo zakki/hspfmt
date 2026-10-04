@@ -1,0 +1,6 @@
+; hspfmt: ignore
+ if a {
+    x = 1
+; hspfmt: ignore
+  }
+y = 2

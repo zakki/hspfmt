@@ -1,0 +1,4 @@
+if ((flag)) : x=1
+while ((a)+(b))
+x=2
+wend

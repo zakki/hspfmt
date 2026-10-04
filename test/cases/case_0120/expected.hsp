@@ -1,0 +1,9 @@
+#chsp_module
+#deffunc helper
+    return
+#chsp_deffunc f
+    return
+
+#chsp_end
+#chsp_module_end
+x = 1

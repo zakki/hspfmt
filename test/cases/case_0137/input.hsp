@@ -1,0 +1,6 @@
+#deffunc f
+return
+; body comment
+
+#deffunc g
+return

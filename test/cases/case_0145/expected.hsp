@@ -1,0 +1,3 @@
+*main
+goto *main
+a = a * 2 + -1

@@ -1,0 +1,9 @@
+#chsp_module \
+ target=plugin
+#chsp_defcfunc f \
+ int a,\
+ int b -> int
+    return a + b
+#chsp_end
+#chsp_module_end
+x = 1

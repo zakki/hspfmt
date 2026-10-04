@@ -1,0 +1,5 @@
+#module m
+#deffunc f
+	  x=1
+#global
+  x=2

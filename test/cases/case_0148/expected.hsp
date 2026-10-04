@@ -1,0 +1,6 @@
+*first
+    x = 1
+    ; body comment
+
+*second
+    x = 2

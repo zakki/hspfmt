@@ -1,0 +1,13 @@
+# トップレベルは字下げなし、ラベル本体とループ本体はタブ1段下げるスタイル。
+encoding=utf8
+indent=4
+tabs
+base-indent=0
+loop-indent=1
+indent-labels
+
+# 演算子・カンマは空白なし。コロンの前後とコメント前は1スペース。
+operator-spacing=compact
+comma-spacing=compact
+colon-spacing=space
+comment-spacing=space

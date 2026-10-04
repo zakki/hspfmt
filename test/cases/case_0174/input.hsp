@@ -1,0 +1,6 @@
+a = *lb1
+labels(0)=*lb1:labels.1=*lb2
+a@mod=*lb1@mod
+gosub a
+onclick gosub labels(0)
+product=x*y

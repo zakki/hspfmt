@@ -1,0 +1,9 @@
+s={"
+#module text
+"}
+; hspfmt: off
+#module kept
+; hspfmt: on
+
+
+#module m

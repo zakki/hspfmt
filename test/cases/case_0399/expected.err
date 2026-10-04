@@ -1,0 +1,1 @@
+hspfmt: input.hsp:3: cannot determine encoding: neither valid UTF-8 nor valid CP932; specify --encoding explicitly

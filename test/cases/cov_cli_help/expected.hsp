@@ -1,0 +1,32 @@
+Usage: hspfmt [options] [file...|-]
+Writes formatted source to stdout unless --write is specified.
+  --write, -w          Replace the input file(s) in place (no stdout)
+  --check              Exit 1 if formatting differs, 0 if unchanged
+  --roundtrip          Reconstruct source from lossless tokens
+  --config=FILE        Load configuration file (default: .hspfmt)
+  --no-config          Disable configuration file loading
+  --stdin-filepath=PATH File path used in diagnostic messages for stdin
+  --indent=N|preserve --tabs (default: 4 spaces)
+  --base-indent=N      Base indentation levels (0..16; default: 0)
+  --loop-indent=N      Indentation levels per loop (0..16; default: 1)
+  --compact-operators Remove optional binary-operator spaces
+  --operator-spacing=preserve|space|compact (default: space)
+  --comma-spacing=preserve|space|compact (default: space after commas)
+  --colon-spacing=preserve|space|compact (default: space)
+  --comment-spacing=preserve|space|compact (before comments; default: space)
+  --full-width-spaces=preserve|normalize (default: preserve)
+  --hsp-prefixes       Convert 0x/0b to $/% (preserve digits)
+  --operator-style=preserve|hsp|c (binary operator spelling)
+  --increment-style=preserve|hsp|c (increment/decrement statements)
+  --short-if           Collapse if blocks containing ordinary statements
+  --line-width=N       Short-if byte width limit (default: 100)
+  --indent-labels / --no-indent-labels (default: no indentation)
+  --comment-style=preserve|semicolon|c (line comment markers)
+  --block-comments=preserve|lines|block (standalone comments)
+  --condition-parens=preserve|add|remove (if/while)
+  --repeat-parens=preserve|add|remove (each repeat argument)
+  --blank-lines-before-module=N|preserve (0..16)
+  --blank-lines-before-deffunc=N|preserve (0..16)
+  --blank-lines-before-defcfunc=N|preserve (0..16)
+  --encoding=auto|utf8|cp932 (default: auto; bytes are preserved)
+Exit 2 indicates an input, syntax, option, or output error.

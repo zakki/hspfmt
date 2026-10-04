@@ -1,0 +1,5 @@
+repeat 2
+while flag
+mes a
+wend
+loop

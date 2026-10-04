@@ -1,0 +1,4 @@
+#chsp_module
+#CHSP_DEFCFUNC f str s,local[str] v -> str ; keep  comment  
+#chsp_end
+#chsp_module_end

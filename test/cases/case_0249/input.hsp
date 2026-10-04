@@ -1,0 +1,3 @@
+if a {
+#define value 1
+}

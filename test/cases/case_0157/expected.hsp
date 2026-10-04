@@ -1,0 +1,5 @@
+onclick gosub *queue_mouse_click
+onkey goto *key
+onexit gosub *exit
+onerror goto *error
+oncmd gosub *message, 100 + 2

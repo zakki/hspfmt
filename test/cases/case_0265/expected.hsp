@@ -1,0 +1,2 @@
+#deffunc f
+	if z = 0 : return

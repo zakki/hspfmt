@@ -1,0 +1,12 @@
+; module docs
+#module m
+
+; function docs
+#deffunc f
+    x = 1
+#defcfunc g
+    return 1
+#global
+
+
+#module n

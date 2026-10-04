@@ -1,0 +1,4 @@
+#chsp_module
+#chsp_deffunc f
+repeat 2
+#chsp_end

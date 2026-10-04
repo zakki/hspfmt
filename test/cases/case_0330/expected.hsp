@@ -1,0 +1,4 @@
+if x { /* multiline
+ kept */
+    x = 1
+}

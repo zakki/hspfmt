@@ -1,0 +1,6 @@
+--base-indent=0
+--loop-indent=1
+--operator-spacing=space
+--comma-spacing=space
+--colon-spacing=space
+--comment-spacing=space

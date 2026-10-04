@@ -1,0 +1,4 @@
+; hspfmt: ignore
+if flag {
+return
+}

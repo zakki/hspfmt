@@ -1,0 +1,6 @@
+#deffunc f
+return
+; docs
+; more
+#deffunc g
+return

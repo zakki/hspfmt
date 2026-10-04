@@ -30,6 +30,11 @@ if(BUILD_TESTING)
             "-DFORMATTER=$<TARGET_FILE:hspfmt>"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/../test/output_failure.cmake")
     endif()
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_test(NAME hspfmt_cases COMMAND Python3::Interpreter
+        "${CMAKE_CURRENT_SOURCE_DIR}/../test/run_tests.py"
+        --formatter "$<TARGET_FILE:hspfmt>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../test/cases")
     add_executable(hspfmt_corpus ../test/corpus.cpp)
     target_link_libraries(hspfmt_corpus PRIVATE hspfmt_lib)
 endif()

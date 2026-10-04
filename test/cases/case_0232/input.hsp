@@ -1,0 +1,3 @@
+if flag {
+mes 1
+}

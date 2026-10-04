@@ -1,0 +1,3 @@
+*first
+    ; operand comment
+    x = *second

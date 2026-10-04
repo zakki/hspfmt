@@ -1,0 +1,2 @@
+#define f(%1) mes %1 : mes %1
+f 1

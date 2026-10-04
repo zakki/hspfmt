@@ -1,0 +1,4 @@
+mes (a)=b
+while (a)=b
+a-=1
+wend

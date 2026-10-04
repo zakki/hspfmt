@@ -1,0 +1,4 @@
+--encoding=utf8
+--operator-spacing=compact
+--operator-style=c
+--increment-style=c

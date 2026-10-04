@@ -1,0 +1,5 @@
+--comment-style=semicolon
+--block-comments=lines
+--blank-lines-before-module=2
+--blank-lines-before-deffunc=1
+--blank-lines-before-defcfunc=0

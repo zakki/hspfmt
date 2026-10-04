@@ -1,0 +1,3 @@
+a = 1		; aligned
+mes 1// adjacent
+x = 2 /* block */

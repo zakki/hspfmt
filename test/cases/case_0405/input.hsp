@@ -1,0 +1,6 @@
+repeat
+#if A
+loop
+#else
+#endif
+loop

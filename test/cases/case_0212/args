@@ -1,0 +1,9 @@
+--hsp-prefixes
+--short-if
+--comment-style=c
+--block-comments=lines
+--condition-parens=add
+--repeat-parens=add
+--blank-lines-before-module=2
+--operator-style=c
+--increment-style=c

@@ -1,0 +1,5 @@
+; hspfmt: ignore
+mes　1,\
+　2,\
+　3
+mes 漢字

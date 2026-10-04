@@ -1,0 +1,7 @@
+repeat (n + 1), (f(1, 2))
+    x = 1
+loop
+repeat , (2)
+loop
+repeat
+loop

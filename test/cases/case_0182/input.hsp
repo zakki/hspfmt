@@ -1,0 +1,7 @@
+#if FLAG
+while x
+#else
+while y
+#endif
+a=1
+wend

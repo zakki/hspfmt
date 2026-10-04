@@ -1,0 +1,7 @@
+#if A
+repeat 2
+#else
+repeat 3
+#endif
+x=1
+loop

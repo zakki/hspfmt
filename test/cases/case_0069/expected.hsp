@@ -1,0 +1,4 @@
+; hspfmt: off
+foo*bar
+; hspfmt: on
+foo*bar

@@ -1,0 +1,4 @@
+#chsp_module
+#chsp_deffunc f int a,int b -> int
+#chsp_end
+#chsp_module_end

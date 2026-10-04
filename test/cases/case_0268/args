@@ -1,0 +1,3 @@
+--short-if
+--line-width=15
+--condition-parens=remove

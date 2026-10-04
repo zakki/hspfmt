@@ -1,0 +1,6 @@
+; hello
+x=1 ; tail
+; hspfmt: off
+x=2 ; kept
+; hspfmt: on
+x=3

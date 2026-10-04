@@ -1,0 +1,9 @@
+*main
+    a = 1
+    goto *next
+    return
+    a = 2
+*next
+    repeat 2
+        a++
+    loop

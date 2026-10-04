@@ -1,0 +1,4 @@
+input.hsp:1: warning: ambiguous label or multiplication; preserving whitespace
+ï»¿foo*bar
+input.hsp:2: warning: ambiguous label or multiplication; preserving whitespace
+foo *•\

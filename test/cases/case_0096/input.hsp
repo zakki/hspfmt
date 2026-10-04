@@ -1,0 +1,13 @@
+#chsp_module "native" target=c
+#chsp_defcfunc sum array[int] a,int n,local[int] v -> int
+v=0
+repeat n
+if a(cnt)>0 {
+v+=a(cnt)
+}
+loop
+return v
+#chsp_end
+; module comment
+#chsp_module_end
+x=sum(a,2)

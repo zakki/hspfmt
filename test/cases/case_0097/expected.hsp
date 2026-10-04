@@ -1,0 +1,4 @@
+#chsp_module
+#chsp_deffunc f int64 x, label cb, local[int64[2][3][4][5]] v -> void
+#chsp_end
+#chsp_module_end

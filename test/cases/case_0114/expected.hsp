@@ -1,0 +1,7 @@
+#chsp_module
+; hspfmt: ignore
+  #chsp_deffunc f int a,int b
+    return
+
+#chsp_end
+#chsp_module_end

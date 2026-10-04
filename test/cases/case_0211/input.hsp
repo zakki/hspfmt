@@ -1,0 +1,3 @@
+; hspfmt: ignore
+foo*bar
+x=1

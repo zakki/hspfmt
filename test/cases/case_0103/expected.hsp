@@ -1,0 +1,4 @@
+#chsp_module
+#chsp_defcfunc f int x ,	local[int[2][3]] v -> int
+#chsp_end
+#chsp_module_end

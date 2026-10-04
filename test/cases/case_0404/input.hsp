@@ -1,0 +1,4 @@
+x=1
+#ifdef A
+repeat
+loop

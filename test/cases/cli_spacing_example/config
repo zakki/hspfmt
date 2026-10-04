@@ -1,0 +1,47 @@
+# HSPサンプル準拠の整形設定。
+# .hspfmt にコピーするか、--config=.hspfmt.example で指定します。
+# 既定値のまま使う設定項目はコメントアウトしています。
+
+# 文字コード（utf8 / cp932）と全角スペース（preserve / normalize）。
+# encoding=utf8
+# full-width-spaces=preserve
+
+# 通常コードはタブ1段。ループで字下げを増やさず、if の波括弧では増やします。
+# indent=4
+tabs
+base-indent=1
+loop-indent=0
+# no-indent-labels
+
+# 演算子・カンマは空白なし、コロンの前後とコメント前は1スペース。
+# 空白指定は preserve / space / compact。
+operator-spacing=compact
+comma-spacing=compact
+# colon-spacing=space
+# comment-spacing=space
+
+# 演算子はHSP表記、増減文は ++ / -- に統一（preserve / hsp / c）。
+operator-style=hsp
+increment-style=c
+
+# 数値の接頭辞を $ / % に変換（既定は無効。コメントを外すと有効）。
+# hsp-prefixes
+
+# 行コメントの記号（preserve / semicolon / c）。
+# comment-style=preserve
+
+# 独立したコメントの形式（preserve / lines / block）。
+# block-comments=preserve
+
+# if / while の式全体と repeat の引数全体を囲む括弧を除去（preserve / add / remove）。
+condition-parens=remove
+repeat-parens=remove
+
+# 本文が1行の if ブロックを短縮（既定は無効。コメントを外すと有効）。
+# short-if
+# line-width=100
+
+# 宣言前の空行数（preserve または 0〜16）。
+# blank-lines-before-module=preserve
+# blank-lines-before-deffunc=preserve
+# blank-lines-before-defcfunc=preserve

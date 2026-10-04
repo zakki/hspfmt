@@ -1,0 +1,8 @@
+// hspfmt: off
+x=1
+; hspfmt: on
+y=2
+; hspfmt: off
+z=3
+// hspfmt: on 
+w=4

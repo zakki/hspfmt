@@ -1,0 +1,6 @@
+*first
+x=1
+; docs
+// second line
+  *second
+x=2

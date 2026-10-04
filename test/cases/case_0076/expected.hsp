@@ -1,0 +1,5 @@
+#deffunc foo int p
+    x = 1
+    return
+#global
+x = 2

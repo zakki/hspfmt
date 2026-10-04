@@ -1,0 +1,7 @@
+mes "; hspfmt: ignore"
+a=1 ; hspfmt: ignore
+b=2
+// hspfmt: ignore
+c=3
+/* hspfmt: ignore */
+d=4

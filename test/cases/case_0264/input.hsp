@@ -1,0 +1,4 @@
+if e=0 { uy-- }
+if z=0 {
+return
+}

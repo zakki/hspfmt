@@ -1,0 +1,7 @@
+; hspfmt: off 	
+x=1
+; hspfmt: on 
+x=2
+; hspfmt: ignore  
+y  =1
+z=1

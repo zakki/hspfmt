@@ -1,0 +1,13 @@
+; hspfmt: ignore
+if a=0x1 { x+ } ; kept
+; hspfmt: ignore
+repeat 2
+    x++
+loop
+; hspfmt: ignore
+/* kept
+ block */
+; hspfmt: ignore
+#module m
+#global
+x = $1 // changed

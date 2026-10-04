@@ -1,0 +1,4 @@
+//hspfmt: off
+x = 1
+;hspfmt: ignore
+y = 2
