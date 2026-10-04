@@ -16,7 +16,9 @@ pub use formatter::{format, format_utf8};
 pub use lexer::{lex, Kind, Token};
 pub use options::*;
 
+/// New warning kinds may be added without a breaking release.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DiagnosticKind {
     AmbiguousLabelOrMultiplication,
 }

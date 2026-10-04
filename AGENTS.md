@@ -12,6 +12,7 @@
 - `src/encoding.rs`, `src/lexer.rs`, `src/parser.rs`: 文字コードの検証、字句解析、ブロック解析。
 - `src/document.rs`, `src/formatter.rs`: 借用可能なトークン中間表現と整形パス。
 - `src/options.rs`, `src/config.rs`, `src/error.rs`: 公開オプション、設定解析・探索、位置付きエラー。
+- `src/util.rs`: ASCII限定の文字判定と小文字化などの内部ヘルパー。
 - `src/main.rs`: CLI、入出力、`--check`、`--write`。
 - `src/bin/corpus.rs`: 指定したHSPソース群の不変条件を検証するツール。
 - `tests/golden.rs`, `tests/library.rs`: `cargo test` で実行される統合テストとライブラリAPIテスト。

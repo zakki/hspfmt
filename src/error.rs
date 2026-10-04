@@ -6,7 +6,7 @@ pub struct Error {
 }
 
 impl Error {
-    pub fn new(line: Option<usize>, message: impl Into<String>) -> Self {
+    pub(crate) fn new(line: Option<usize>, message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
             line,

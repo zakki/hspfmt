@@ -107,6 +107,28 @@ fn append_newline<'a>(out: &mut Document<'a>, source: &Document<'a>, line: &Sour
     }
 }
 
+const SPACES: &[u8] = &[b' '; 256];
+const TABS: &[u8] = &[b'\t'; 256];
+
+// Indentation shorter than the static buffers borrows them instead of allocating per line.
+fn indentation(tabs: bool, size: usize) -> Cow<'static, [u8]> {
+    let fill = if tabs { TABS } else { SPACES };
+    match fill.get(..size) {
+        Some(text) => Cow::Borrowed(text),
+        None => Cow::Owned(vec![fill[0]; size]),
+    }
+}
+
+fn without_location(error: Error) -> Error {
+    Error::new(None, error.message())
+}
+
+fn extend_atoms(out: &mut Vec<u8>, atoms: &[Atom<'_>]) {
+    for atom in atoms {
+        out.extend_from_slice(&atom.text);
+    }
+}
+
 fn normalize_full_width_spaces<'a>(
     source: Document<'a>,
     encoding: ResolvedEncoding,
@@ -181,13 +203,13 @@ fn normalize_full_width_spaces<'a>(
                 while pos < atom.text.len() {
                     let next = character_end(&atom.text, pos, encoding)?;
                     if &atom.text[pos..next] == full_space {
-                        fragment.push(Kind::Word, atom.slice(begin, pos), atom.offset + begin);
-                        fragment.push(Kind::Space, Cow::Borrowed(b" "), atom.offset + pos);
+                        fragment.push(Kind::Word, atom.slice(begin, pos));
+                        fragment.push(Kind::Space, Cow::Borrowed(b" "));
                         begin = next;
                     }
                     pos = next;
                 }
-                fragment.push(Kind::Word, atom.slice(begin, pos), atom.offset + begin);
+                fragment.push(Kind::Word, atom.slice(begin, pos));
             }
             out.append(&classify_fragment(fragment, encoding)?.atoms);
             index = end;
@@ -208,7 +230,9 @@ fn classify_fragment<'a>(
     let mut out = Document::default();
     let mut atom_index = 0;
     let mut atom_begin = 0;
-    for token in lex_fragment(&bytes, encoding)? {
+    // Positions inside a fragment are not input positions; report the message only.
+    let tokens = lex_fragment(&bytes, encoding).map_err(without_location)?;
+    for token in tokens {
         while atom_begin + fragment.atoms[atom_index].text.len() <= token.begin {
             atom_begin += fragment.atoms[atom_index].text.len();
             atom_index += 1;
@@ -219,7 +243,7 @@ fn classify_fragment<'a>(
         } else {
             Cow::Owned(bytes[token.begin..token.end].to_vec())
         };
-        out.push(token.kind, text, atom.offset + token.begin - atom_begin);
+        out.push(token.kind, text);
     }
     Ok(out)
 }
@@ -254,7 +278,6 @@ fn rewrite_comments<'a>(source: Document<'a>, options: &Options) -> Document<'a>
             && !body(line).windows(2).any(|w| w == b"*/" || w == b"/*")
         {
             out.append(&tokens[line.begin..line.first]);
-            let offset = tokens[line.first].offset;
             let mut comment = b"/*".to_vec();
             comment.extend_from_slice(body(line));
             while i + 1 < lines.len()
@@ -270,7 +293,7 @@ fn rewrite_comments<'a>(source: Document<'a>, options: &Options) -> Document<'a>
                 comment.extend_from_slice(body(&lines[i]));
             }
             comment.extend_from_slice(b"*/");
-            out.push(Kind::Comment, Cow::Owned(comment), offset);
+            out.push(Kind::Comment, Cow::Owned(comment));
             out.append(&tokens[lines[i].first + 1..lines[i].end]);
             append_newline(&mut out, &source, &lines[i]);
         } else if options.block_comments == BlockComments::Lines
@@ -292,7 +315,7 @@ fn rewrite_comments<'a>(source: Document<'a>, options: &Options) -> Document<'a>
                     .position(|&b| b == b'\r' || b == b'\n')
                     .map_or(content.len(), |n| pos + n);
                 let comment = [prefix, &content[pos..end]].concat();
-                out.push(Kind::Comment, Cow::Owned(comment), atom.offset + 2 + pos);
+                out.push(Kind::Comment, Cow::Owned(comment));
                 if end == content.len() {
                     break;
                 }
@@ -302,20 +325,12 @@ fn rewrite_comments<'a>(source: Document<'a>, options: &Options) -> Document<'a>
                     } else {
                         1
                     };
-                out.push(
-                    Kind::Newline,
-                    atom.slice(2 + end, 2 + next),
-                    atom.offset + 2 + end,
-                );
+                out.push(Kind::Newline, atom.slice(2 + end, 2 + next));
                 pos = next;
                 // Preserve the legacy trailing empty line comment as well.
                 if pos == content.len() {
                     out.append(&tokens[indent_begin..line.first]);
-                    out.push(
-                        Kind::Comment,
-                        Cow::Owned(prefix.to_vec()),
-                        atom.offset + 2 + pos,
-                    );
+                    out.push(Kind::Comment, Cow::Owned(prefix.to_vec()));
                     break;
                 }
             }
@@ -337,7 +352,6 @@ fn rewrite_comments<'a>(source: Document<'a>, options: &Options) -> Document<'a>
                     out.push(
                         Kind::Comment,
                         Cow::Owned([prefix, &atom.text[begin..]].concat()),
-                        atom.offset,
                     );
                 } else {
                     out.append(std::slice::from_ref(atom));
@@ -350,10 +364,11 @@ fn rewrite_comments<'a>(source: Document<'a>, options: &Options) -> Document<'a>
     out
 }
 
-fn declaration_layout<'a>(source: Document<'a>, options: &Options) -> Document<'a> {
-    let lines = source_lines(&source);
+// The final pass writes bytes directly instead of building another Document.
+fn declaration_layout(source: &Document<'_>, options: &Options) -> Vec<u8> {
+    let lines = source_lines(source);
     let tokens = &source.atoms;
-    let mut out = Document::default();
+    let mut out = Vec::with_capacity(source.byte_len());
     let mut copied = 0;
     for (i, line) in lines.iter().enumerate() {
         if line.opaque || line.multiline || line.first + 1 >= line.last {
@@ -409,11 +424,11 @@ fn declaration_layout<'a>(source: Document<'a>, options: &Options) -> Document<'
         if lines[start].begin < copied {
             continue;
         }
-        out.append(&tokens[copied..lines[start].begin]);
+        extend_atoms(&mut out, &tokens[copied..lines[start].begin]);
         let at_start = count >= 0 && start == 0;
         let bom = tokens.first().map(|t| t.kind) == Some(Kind::Bom);
         if at_start && bom {
-            out.append(&tokens[..1]);
+            extend_atoms(&mut out, &tokens[..1]);
         }
         let newline_index = if start > 0 {
             lines[start - 1].end
@@ -422,7 +437,7 @@ fn declaration_layout<'a>(source: Document<'a>, options: &Options) -> Document<'
         };
         if !at_start && newline_index < tokens.len() {
             for _ in 0..count {
-                out.append(&tokens[newline_index..newline_index + 1]);
+                extend_atoms(&mut out, &tokens[newline_index..newline_index + 1]);
             }
         }
         copied = lines[content].begin;
@@ -432,16 +447,18 @@ fn declaration_layout<'a>(source: Document<'a>, options: &Options) -> Document<'
         if !options.preserve_indent {
             for comment in &lines[content..i] {
                 if copied == 0 && bom {
-                    out.append(&tokens[..1]);
+                    extend_atoms(&mut out, &tokens[..1]);
                 }
-                out.append(&tokens[line.begin..line.first]);
-                out.append(&tokens[comment.first..comment.end]);
-                append_newline(&mut out, &source, comment);
+                extend_atoms(&mut out, &tokens[line.begin..line.first]);
+                extend_atoms(&mut out, &tokens[comment.first..comment.end]);
+                if comment.end < tokens.len() {
+                    extend_atoms(&mut out, &tokens[comment.end..comment.end + 1]);
+                }
                 copied = (comment.end + 1).min(tokens.len());
             }
         }
     }
-    out.append(&tokens[copied..]);
+    extend_atoms(&mut out, &tokens[copied..]);
     out
 }
 
@@ -1081,14 +1098,14 @@ fn print_items<'a>(
             if item.gap != desired {
                 found_ambiguity = true;
             }
-            out.push(Kind::Space, item.gap.clone(), 0);
+            out.push(Kind::Space, item.gap.clone());
         } else if preserve_gap {
-            out.push(Kind::Space, item.gap.clone(), 0);
+            out.push(Kind::Space, item.gap.clone());
         } else if space {
-            out.push(Kind::Space, Cow::Borrowed(b" "), 0);
+            out.push(Kind::Space, Cow::Borrowed(b" "));
         }
 
-        out.push(item.kind, text.clone(), 0);
+        out.push(item.kind, text.clone());
         previous_command = command && (item.kind == Kind::Word || text == b"@".as_slice());
         previous_prefix = prefix;
         if text.as_ref() == b"(".as_slice() || text == b"[".as_slice() {
@@ -1114,7 +1131,7 @@ fn print_items<'a>(
     }
 
     let bytes = out.bytes();
-    let printed_tokens = lex_resolved(&bytes, encoding)?;
+    let printed_tokens = lex_resolved(&bytes, encoding).map_err(without_location)?;
     let mut index = 0;
     for token in &printed_tokens {
         if token.kind == Kind::Space {
@@ -1309,12 +1326,13 @@ fn short_if_lines<'a>(
     Ok(out)
 }
 
-struct FormatContext<'a> {
-    source: &'a Document<'a>,
-    options: &'a Options,
+// `'s` borrows pass inputs; `'a` is the original source shared by output atoms.
+struct FormatContext<'s, 'a> {
+    source: &'s Document<'a>,
+    options: &'s Options,
     encoding: ResolvedEncoding,
-    diagnostics: Option<&'a mut Vec<Diagnostic>>,
-    original_lines: &'a [(&'a [u8], usize)],
+    diagnostics: Option<&'s mut Vec<Diagnostic>>,
+    original_lines: &'s [(&'s [u8], usize)],
 
     state: State,
     conditionals: Vec<Conditional>,
@@ -1329,7 +1347,7 @@ struct FormatContext<'a> {
     ignored: bool,
 }
 
-impl<'a> FormatContext<'a> {
+impl<'a> FormatContext<'_, 'a> {
     fn flush(
         &mut self,
         end: usize,
@@ -1583,9 +1601,8 @@ impl<'a> FormatContext<'a> {
                             .count();
                     self.out.append(&self.source.atoms[self.begin..prefix_end]);
                 } else {
-                    let fill_byte = if self.options.tabs { b'\t' } else { b' ' };
                     self.out
-                        .push(Kind::Space, Cow::Owned(vec![fill_byte; indent_size]), 0);
+                        .push(Kind::Space, indentation(self.options.tabs, indent_size));
                 }
                 let mut ambiguous_spacing = false;
                 let formatted_line = print_items(
@@ -1624,8 +1641,7 @@ impl<'a> FormatContext<'a> {
                 && self.items[0].text == b"#".as_slice()
             {
                 if let Some(formatted_decl) = declaration_commas(&self.items, self.options) {
-                    self.out
-                        .append_items(&formatted_decl, self.source.atoms[self.begin].offset);
+                    self.out.append_items(&formatted_decl);
                     let trailing = self.source.atoms[self.begin..end]
                         .iter()
                         .rposition(|t| t.kind != Kind::Space)
@@ -1781,8 +1797,11 @@ fn format_impl(
         ));
     }
 
-    let out = short_if_lines(ctx.out, options, encoding)?;
-    Ok(declaration_layout(out, options).bytes())
+    // Release the pre-pass document before the post passes build their copies.
+    let out = ctx.out;
+    drop(document);
+    let out = short_if_lines(out, options, encoding)?;
+    Ok(declaration_layout(&out, options))
 }
 
 /// Format lossless source bytes. Diagnostics are appended to the supplied vector.

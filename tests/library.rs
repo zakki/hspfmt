@@ -1,5 +1,5 @@
 use hspfmt::config::{find_config, parse_config, parse_formatting_option};
-use hspfmt::{format, format_utf8, lex, BlockComments, DiagnosticKind, Encoding, Error, Options};
+use hspfmt::{format, format_utf8, lex, BlockComments, DiagnosticKind, Encoding, Options};
 use std::path::{Path, PathBuf};
 
 #[test]
@@ -35,7 +35,7 @@ fn errors_distinguish_input_positions_from_option_errors() {
     let error = format(b"", &options, None).unwrap_err();
     assert_eq!(error.line(), None);
     assert_eq!(error.byte_offset(), None);
-    assert_eq!(Error::new(None, "option error").to_string(), "option error");
+    assert_eq!(error.to_string(), "indent width must be between 0 and 16");
 }
 
 #[test]
@@ -83,6 +83,11 @@ fn config_parsing_is_available_without_file_io() {
     let error = parse_config(b"indent=2\n\xff\n", &mut options).unwrap_err();
     assert_eq!(error.line(), Some(2));
     assert_eq!(error.message(), "config options must be ASCII");
+
+    // A failed config leaves earlier lines unapplied.
+    assert_eq!(options.indent_width, 2);
+    parse_config(b"indent=3\nunknown\n", &mut options).unwrap_err();
+    assert_eq!(options.indent_width, 2);
 }
 
 #[test]

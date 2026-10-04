@@ -172,6 +172,9 @@ C++実装をRustで再実装し、C++実装を廃止する。現在の利用形�
 - [x] `Error::line()` と `Error::new()` の行番号を `Option<usize>` にする
   - 行番号は1始まり、位置なしは `None`。`byte_offset()` は0始まりの入力バイト位置を返す。
     字句エラーは検出位置、構造エラーは該当する原文行の先頭、設定エラーはオプションの先頭。
+  - 行の断片を局所的にlexする箇所（行内整形の照合、全角スペース正規化後の分類）のエラーは、
+    入力上の位置ではないため行番号・バイト位置を付けない。
+  - `Error::new` はcrate内部専用にする。
 - [x] `Item` のテキストと空白を `Cow<[u8]>` にし、未変更部分は原文を借用する
 - [x] `State` の関数・ラベル状態をbool、cHSP開始行を `Option<usize>` にする
   - プリプロセッサの分岐状態も `Option<State>` にし、別の整数・有効フラグを持たない。
@@ -184,8 +187,12 @@ C++実装をRustで再実装し、C++実装を廃止する。現在の利用形�
     設定探索はカレントディレクトリを引数で受け取り、存在確認を呼び出し元へ委譲し、
     ライブラリ自体はファイルI/Oを行わない。
   - 内部パスは非公開。`detect_encoding` と `lex` は引き続き公開する。
+  - `DiagnosticKind` は `#[non_exhaustive]` にする。`Options` は構造体リテラルと
+    `..Options::default()` で使えるよう `non_exhaustive` にせず、フィールド追加は0.x系の破壊的変更として扱う。
+  - `parse_config` はエラー時に `Options` を変更しない（全行の解析が成功した場合のみ反映する）。
 - [x] Unixの `--write` で置換後に親ディレクトリを同期する
   - パーミッションも一時ファイルの同期前に設定する。
+  - 親ディレクトリを読み取りで開けない場合は置換を行い、同期を省略する（`-wx` ディレクトリでも従来どおり動作する）。
   - 置換後の同期失敗は「置換済み」を明記して終了ステータス2にする。
     置換前の失敗時の原文保持と無変更時の無書き込みは維持する。
 - [x] stableのCIに `cargo fmt --check` と `cargo clippy --all-targets -- -D warnings` を追加する
@@ -203,6 +210,17 @@ C++実装をRustで再実装し、C++実装を廃止する。現在の利用形�
 - [x] OpenHSP統合テストとcHSP統合テスト（plugin/Cの両モード）が成功。
 - [x] `cargo build --release`、`cargo test --release`、`cargo fmt --check`、
   `cargo clippy --all-targets -- -D warnings` が成功。
+
+- [x] 性能（4MB・30万行の入力、5回の最良値）。段階3（`1f1e8ac`）と同程度に収める。
+
+  | オプション | 段階3 | 段階4 |
+  | --- | --- | --- |
+  | `--no-config` | 0.44秒 / 172MB | 0.42秒 / 188MB |
+  | `--short-if --comment-style=c --full-width-spaces=normalize` | 0.68秒 / 195MB | 0.77秒 / 240MB |
+
+  - 当初の段階4は367MBと393MBだった。読み出されない `Atom.offset` の削除、
+    メインパス後の前段 `Document` の解放、最終パス（`declaration_layout`）のバイト列への直接出力、
+    インデント文字列の静的バッファ借用で改善した。
 
 ローカルにはwasm32とRust 1.70のツールチェーンがないため、これらのビルドは未実施。
 CIでwasm32、Rust 1.70、Windowsを検証する。

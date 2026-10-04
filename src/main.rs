@@ -118,9 +118,9 @@ fn replace_file(path: &Path, output: &[u8]) -> Result<(), String> {
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
+    // A write-only directory cannot be opened for sync; replacement still works there.
     #[cfg(unix)]
-    let parent_directory =
-        File::open(parent).map_err(|e| format!("cannot open input directory: {}", e))?;
+    let parent_directory = File::open(parent).ok();
     let mut directory = PathBuf::new();
 
     // Use timestamp and process ID to generate pseudorandom names without external crates
@@ -178,12 +178,14 @@ fn replace_file(path: &Path, output: &[u8]) -> Result<(), String> {
 
     drop(_cleanup);
     #[cfg(unix)]
-    parent_directory.sync_all().map_err(|e| {
-        format!(
-            "input file replaced but parent directory sync failed: {}",
-            e
-        )
-    })?;
+    if let Some(parent_directory) = parent_directory {
+        parent_directory.sync_all().map_err(|e| {
+            format!(
+                "input file replaced but parent directory sync failed: {}",
+                e
+            )
+        })?;
+    }
     Ok(())
 }
 

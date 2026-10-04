@@ -137,8 +137,9 @@ pub fn parse_formatting_option(arg: &str, options: &mut Options) -> Result<bool,
 }
 
 /// Apply ASCII config lines to options, reporting positions in the config bytes.
-/// Options preceding an invalid line have already been applied.
+/// On error, `options` is left unchanged.
 pub fn parse_config(content: &[u8], options: &mut Options) -> Result<(), Error> {
+    let mut parsed = options.clone();
     let mut offset = 0;
     for (line_idx, line) in content.split(|&b| b == b'\n').enumerate() {
         let line_offset = offset;
@@ -167,7 +168,7 @@ pub fn parse_config(content: &[u8], options: &mut Options) -> Result<(), Error> 
         } else {
             format!("--{}", trimmed)
         };
-        match parse_formatting_option(&opt, options) {
+        match parse_formatting_option(&opt, &mut parsed) {
             Ok(true) => {}
             _ => {
                 return Err(Error::new(
@@ -178,6 +179,7 @@ pub fn parse_config(content: &[u8], options: &mut Options) -> Result<(), Error> 
             }
         }
     }
+    *options = parsed;
     Ok(())
 }
 

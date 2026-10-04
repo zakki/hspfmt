@@ -10,7 +10,6 @@ use crate::{Error, Kind};
 pub(crate) struct Atom<'a> {
     pub kind: Kind,
     pub text: Cow<'a, [u8]>,
-    pub offset: usize,
 }
 
 impl<'a> Atom<'a> {
@@ -35,7 +34,6 @@ impl<'a> Document<'a> {
                 .map(|token| Atom {
                     kind: token.kind,
                     text: Cow::Borrowed(&source[token.begin..token.end]),
-                    offset: token.begin,
                 })
                 .collect(),
         })
@@ -45,9 +43,9 @@ impl<'a> Document<'a> {
         &self.atoms[index].text
     }
 
-    pub fn push(&mut self, kind: Kind, text: Cow<'a, [u8]>, offset: usize) {
+    pub fn push(&mut self, kind: Kind, text: Cow<'a, [u8]>) {
         if !text.is_empty() {
-            self.atoms.push(Atom { kind, text, offset });
+            self.atoms.push(Atom { kind, text });
         }
     }
 
@@ -55,10 +53,10 @@ impl<'a> Document<'a> {
         self.atoms.extend_from_slice(atoms);
     }
 
-    pub fn append_items(&mut self, items: &[Item<'a>], offset: usize) {
+    pub fn append_items(&mut self, items: &[Item<'a>]) {
         for item in items {
-            self.push(Kind::Space, item.gap.clone(), offset);
-            self.push(item.kind, item.text.clone(), offset);
+            self.push(Kind::Space, item.gap.clone());
+            self.push(item.kind, item.text.clone());
         }
     }
 
