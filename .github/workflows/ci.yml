@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build-and-test:
-    name: Build and test (${{ matrix.os }})
+    name: Build and test (${{ matrix.os }}, Rust ${{ matrix.toolchain }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -18,7 +18,11 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
+            toolchain: stable
           - os: windows-latest
+            toolchain: stable
+          - os: ubuntu-latest
+            toolchain: 1.70.0
     defaults:
       run:
         shell: bash
@@ -31,6 +35,8 @@ jobs:
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.toolchain }}
 
       - name: Build
         run: cargo build --release

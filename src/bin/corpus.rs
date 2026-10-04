@@ -23,7 +23,7 @@ fn collect_files(dir: &Path, files: &mut Vec<PathBuf>) {
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    let args: Vec<_> = env::args_os().collect();
     if args.len() < 2 {
         eprintln!("Usage: hspfmt_corpus directory [directory ...]");
         process::exit(2);

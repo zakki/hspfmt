@@ -317,7 +317,7 @@ def run_behavioral_tests(formatter, verbose=False):
 
         # 8. --write rejects symbolic link
         target_file = td / "target.hsp"
-        target_file.write_text("x=1\n")
+        target_file.write_bytes(b"x=1\n")
         symlink_file = td / "symlink.hsp"
         try:
             symlink_file.symlink_to(target_file)
@@ -331,6 +331,113 @@ def run_behavioral_tests(formatter, verbose=False):
                 failures.append("Symlink write check failed")
         except OSError:
             pass  # Ignore on platforms where symlinks require privileges
+
+        # 9. Reject hard links on both Unix and Windows, before any file is replaced.
+        hardlink_file = td / "hardlink.hsp"
+        os.link(target_file, hardlink_file)
+        proc = subprocess.run(
+            [str(formatter), "--no-config", "--write", "unformatted.hsp", "hardlink.hsp"],
+            cwd=td,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if proc.returncode != 2 or b"requires a regular file without symbolic or hard links" not in proc.stderr:
+            failures.append("Hardlink write check failed")
+        if target_file.read_bytes() != b"x=1\n" or hardlink_file.read_bytes() != b"x=1\n":
+            failures.append("Hardlink write changed input contents")
+        if not os.path.samefile(target_file, hardlink_file):
+            failures.append("Hardlink write broke the link relationship")
+        if unformatted.read_text() != "x=1\n":
+            failures.append("Hardlink rejection modified an earlier input")
+
+        # 10. Paths that cannot be decoded as UTF-8 must survive CLI parsing on Unix.
+        if os.name == "posix":
+            raw_path = os.fsencode(td) + b"/\x82\xa0.hsp"
+            with open(raw_path, "wb") as f:
+                f.write(b"repeat\na=1\nloop\n")
+            raw_config = os.fsencode(td) + b"/\x82\xa0.hspfmt"
+            with open(raw_config, "wb") as f:
+                f.write("; ソースの設定\nindent=2\n".encode("cp932"))
+            expected = b"repeat\n  a = 1\nloop\n"
+            for extra_args in [[], ["--"]]:
+                proc = subprocess.run(
+                    [str(formatter), b"--config=" + raw_config] + extra_args + [raw_path],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                if proc.returncode != 0 or proc.stdout != expected:
+                    failures.append("Non-UTF8 input/config path formatting failed")
+            proc = subprocess.run(
+                [str(formatter), b"--config=" + raw_config, "--write", raw_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            with open(raw_path, "rb") as f:
+                if proc.returncode != 0 or f.read() != expected:
+                    failures.append("Non-UTF8 path write failed")
+            proc = subprocess.run(
+                [str(formatter), "--no-config", b"--stdin-filepath=" + raw_path],
+                input=b"repeat\n",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            if proc.returncode != 2 or b"unterminated block, expected loop" not in proc.stderr:
+                failures.append("Non-UTF8 stdin diagnostic path failed")
+
+        # 11. --write must preserve Unix permissions and a file-specific Windows DACL.
+        permission_file = td / "permissions.hsp"
+        permission_file.write_bytes(b"x=1\n")
+        if os.name == "posix":
+            import stat
+
+            permission_file.chmod(0o640)
+            proc = subprocess.run(
+                [str(formatter), "--no-config", "--write", str(permission_file)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            if proc.returncode != 0 or stat.S_IMODE(permission_file.stat().st_mode) != 0o640:
+                failures.append("Write did not preserve Unix permissions")
+        elif os.name == "nt":
+            acl_env = dict(os.environ, HSPFMT_TEST_ACL_PATH=str(permission_file))
+            get_acl = """
+$ErrorActionPreference = 'Stop'
+(Get-Acl -LiteralPath $env:HSPFMT_TEST_ACL_PATH).GetSecurityDescriptorSddlForm(
+    [System.Security.AccessControl.AccessControlSections]::Access)
+"""
+            set_acl = """
+$ErrorActionPreference = 'Stop'
+$acl = Get-Acl -LiteralPath $env:HSPFMT_TEST_ACL_PATH
+$acl.SetAccessRuleProtection($true, $false)
+$user = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+$rule = [System.Security.AccessControl.FileSystemAccessRule]::new($user, 'FullControl', 'Allow')
+$acl.SetAccessRule($rule)
+Set-Acl -LiteralPath $env:HSPFMT_TEST_ACL_PATH -AclObject $acl
+"""
+            before = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", set_acl + get_acl],
+                env=acl_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            if before.returncode != 0:
+                failures.append(f"Windows ACL test setup failed: {before.stderr!r}")
+            else:
+                proc = subprocess.run(
+                    [str(formatter), "--no-config", "--write", str(permission_file)],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                after = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command", get_acl],
+                    env=acl_env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                if proc.returncode != 0 or permission_file.read_bytes() != b"x = 1\n":
+                    failures.append(f"Windows ACL write failed: {proc.stderr!r}")
+                if after.returncode != 0 or before.stdout != after.stdout:
+                    failures.append("Write did not preserve the Windows DACL")
 
     return failures
 
@@ -389,4 +496,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

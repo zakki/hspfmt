@@ -3,11 +3,106 @@ use hspfmt::{
     Parentheses, Spacing,
 };
 use std::env;
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::time::SystemTime;
+
+#[cfg(windows)]
+mod windows_file {
+    use std::ffi::c_void;
+    use std::fs::File;
+    use std::io;
+    use std::os::windows::{ffi::OsStrExt, io::AsRawHandle};
+    use std::path::Path;
+
+    // BY_HANDLE_FILE_INFORMATION; FILETIME consists of two DWORDs.
+    #[repr(C)]
+    #[derive(Default)]
+    struct FileInformation {
+        attributes: u32,
+        creation_time: [u32; 2],
+        last_access_time: [u32; 2],
+        last_write_time: [u32; 2],
+        volume_serial_number: u32,
+        size_high: u32,
+        size_low: u32,
+        number_of_links: u32,
+        index_high: u32,
+        index_low: u32,
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetFileInformationByHandle(
+            handle: *mut c_void,
+            information: *mut FileInformation,
+        ) -> i32;
+        fn ReplaceFileW(
+            replaced: *const u16,
+            replacement: *const u16,
+            backup: *const u16,
+            flags: u32,
+            exclude: *mut c_void,
+            reserved: *mut c_void,
+        ) -> i32;
+    }
+
+    pub fn link_count(path: &Path) -> io::Result<u32> {
+        let file = File::open(path)?;
+        let mut information = FileInformation::default();
+        // SAFETY: the file owns a live handle and information has the Win32 layout.
+        if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut information) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(information.number_of_links)
+    }
+
+    pub fn replace(path: &Path, temporary: &Path) -> io::Result<()> {
+        let path: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let temporary: Vec<u16> = temporary.as_os_str().encode_wide().chain(Some(0)).collect();
+        // SAFETY: both names are NUL-terminated UTF-16 buffers alive for the call.
+        // Flags are zero so ACL/attribute merge failures are reported, not ignored.
+        let success = unsafe {
+            ReplaceFileW(
+                path.as_ptr(),
+                temporary.as_ptr(),
+                std::ptr::null(),
+                0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        if success == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+}
+
+fn path_option(arg: &OsStr, prefix: &str) -> Option<PathBuf> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        arg.as_bytes()
+            .strip_prefix(prefix.as_bytes())
+            .map(|path| PathBuf::from(OsStr::from_bytes(path)))
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        let arg: Vec<u16> = arg.encode_wide().collect();
+        let prefix: Vec<u16> = prefix.encode_utf16().collect();
+        arg.strip_prefix(prefix.as_slice())
+            .map(|path| PathBuf::from(OsString::from_wide(path)))
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        arg.to_str()?.strip_prefix(prefix).map(PathBuf::from)
+    }
+}
 
 struct Cleanup {
     file: PathBuf,
@@ -60,11 +155,18 @@ fn replace_file(path: &Path, output: &[u8]) -> Result<(), String> {
         .map_err(|_| "temporary output write failed".to_string())?;
     drop(file);
 
-    if let Ok(meta) = fs::metadata(path) {
-        let _ = fs::set_permissions(&temporary, meta.permissions());
+    #[cfg(not(windows))]
+    {
+        let permissions = fs::metadata(path)
+            .map_err(|e| format!("cannot read input permissions: {}", e))?
+            .permissions();
+        fs::set_permissions(&temporary, permissions)
+            .map_err(|e| format!("cannot preserve input permissions: {}", e))?;
+        fs::rename(&temporary, path).map_err(|e| format!("cannot replace input file: {}", e))?;
     }
-
-    fs::rename(&temporary, path).map_err(|e| format!("cannot replace input file: {}", e))?;
+    #[cfg(windows)]
+    windows_file::replace(path, &temporary)
+        .map_err(|e| format!("cannot replace input file: {}", e))?;
 
     Ok(())
 }
@@ -204,13 +306,27 @@ fn parse_formatting_option(arg: &str, options: &mut Options) -> Result<bool, Str
 }
 
 fn load_config(path: &Path, options: &mut Options) -> Result<(), String> {
-    let content = fs::read_to_string(path)
-        .map_err(|_| format!("cannot open config file: {}", path.display()))?;
-    for (line_idx, line) in content.lines().enumerate() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+    let content =
+        fs::read(path).map_err(|_| format!("cannot open config file: {}", path.display()))?;
+    for (line_idx, line) in content.split(|&b| b == b'\n').enumerate() {
+        // These ASCII separators cannot occur inside a CP932 multibyte character.
+        let is_space = |b: &u8| matches!(b, b' ' | b'\t' | b'\r' | b'\n');
+        let start = line.iter().position(|b| !is_space(b)).unwrap_or(line.len());
+        let end = line
+            .iter()
+            .rposition(|b| !is_space(b))
+            .map_or(start, |i| i + 1);
+        let trimmed = &line[start..end];
+        if trimmed.is_empty() || trimmed.starts_with(b"#") || trimmed.starts_with(b";") {
             continue;
         }
+        let trimmed = std::str::from_utf8(trimmed).map_err(|_| {
+            format!(
+                "{}:{}: config options must be ASCII",
+                path.display(),
+                line_idx + 1
+            )
+        })?;
         let opt = if trimmed.starts_with("--") {
             trimmed.to_string()
         } else {
@@ -269,14 +385,14 @@ fn print_help() {
 }
 
 fn run() -> Result<i32, (Option<String>, String, Option<usize>)> {
-    let args: Vec<String> = env::args().collect();
+    let args: Vec<OsString> = env::args_os().collect();
     let mut options = Options::default();
     let mut check = false;
     let mut write = false;
     let mut roundtrip = false;
     let mut positional = false;
-    let mut stdin_filepath = String::new();
-    let mut config_path = String::new();
+    let mut stdin_filepath = PathBuf::new();
+    let mut config_path = PathBuf::new();
     let mut no_config = false;
     let mut filenames = Vec::new();
 
@@ -290,9 +406,9 @@ fn run() -> Result<i32, (Option<String>, String, Option<usize>)> {
             return Ok(0);
         } else if arg == "--no-config" {
             no_config = true;
-        } else if let Some(path) = arg.strip_prefix("--config=") {
-            config_path = path.to_string();
-            if config_path.is_empty() {
+        } else if let Some(path) = path_option(arg, "--config=") {
+            config_path = path;
+            if config_path.as_os_str().is_empty() {
                 return Err((
                     None,
                     "--config requires a non-empty file path".to_string(),
@@ -303,8 +419,8 @@ fn run() -> Result<i32, (Option<String>, String, Option<usize>)> {
     }
 
     if !no_config {
-        if !config_path.is_empty() {
-            load_config(Path::new(&config_path), &mut options).map_err(|e| (None, e, None))?;
+        if !config_path.as_os_str().is_empty() {
+            load_config(&config_path, &mut options).map_err(|e| (None, e, None))?;
         } else if Path::new(".hspfmt").exists() {
             load_config(Path::new(".hspfmt"), &mut options).map_err(|e| (None, e, None))?;
         }
@@ -312,35 +428,42 @@ fn run() -> Result<i32, (Option<String>, String, Option<usize>)> {
 
     // Second pass: options and filenames
     for arg in &args[1..] {
-        if !positional && arg == "--" {
+        if positional {
+            filenames.push(PathBuf::from(arg));
+            continue;
+        }
+        let text = arg.to_str().unwrap_or("");
+        if arg == "--" {
             positional = true;
-        } else if !positional && (arg == "--no-config" || arg.starts_with("--config=")) {
+        } else if arg == "--no-config" || path_option(arg, "--config=").is_some() {
             // Already handled
-        } else if !positional && arg == "--check" {
+        } else if arg == "--check" {
             check = true;
-        } else if !positional && (arg == "--write" || arg == "-w") {
+        } else if arg == "--write" || arg == "-w" {
             write = true;
-        } else if !positional && arg == "--roundtrip" {
+        } else if arg == "--roundtrip" {
             roundtrip = true;
-        } else if !positional && arg.starts_with("--stdin-filepath=") {
-            stdin_filepath = arg["--stdin-filepath=".len()..].to_string();
-        } else if !positional
-            && parse_formatting_option(arg, &mut options).map_err(|e| (None, e, None))?
-        {
+        } else if let Some(path) = path_option(arg, "--stdin-filepath=") {
+            stdin_filepath = path;
+        } else if parse_formatting_option(text, &mut options).map_err(|e| (None, e, None))? {
             // Handled formatting option
-        } else if !positional && arg.len() > 1 && arg.starts_with('-') {
-            return Err((None, format!("unknown option: {}", arg), None));
+        } else if arg != "-" && arg.to_string_lossy().starts_with('-') {
+            return Err((
+                None,
+                format!("unknown option: {}", arg.to_string_lossy()),
+                None,
+            ));
         } else {
-            filenames.push(arg.clone());
+            filenames.push(PathBuf::from(arg));
         }
     }
 
     if filenames.is_empty() {
-        filenames.push("-".to_string());
+        filenames.push(PathBuf::from("-"));
     }
-    let is_stdin = filenames.len() == 1 && filenames[0] == "-";
+    let is_stdin = filenames.len() == 1 && filenames[0] == Path::new("-");
 
-    if !stdin_filepath.is_empty() && !is_stdin {
+    if !stdin_filepath.as_os_str().is_empty() && !is_stdin {
         return Err((
             None,
             "--stdin-filepath can only be used with stdin".to_string(),
@@ -364,7 +487,7 @@ fn run() -> Result<i32, (Option<String>, String, Option<usize>)> {
             ));
         }
         for f in &filenames {
-            if f == "-" {
+            if f == Path::new("-") {
                 return Err((
                     None,
                     "cannot combine stdin with multiple files".to_string(),
@@ -393,14 +516,14 @@ fn run() -> Result<i32, (Option<String>, String, Option<usize>)> {
     let mut replacements = Vec::new();
 
     for filename in &filenames {
-        let input_name = if filename == "-" {
-            if !stdin_filepath.is_empty() {
-                stdin_filepath.clone()
+        let input_name = if filename == Path::new("-") {
+            if !stdin_filepath.as_os_str().is_empty() {
+                stdin_filepath.display().to_string()
             } else {
                 "<stdin>".to_string()
             }
         } else {
-            filename.clone()
+            filename.display().to_string()
         };
 
         if write {
@@ -431,9 +554,17 @@ fn run() -> Result<i32, (Option<String>, String, Option<usize>)> {
                     ));
                 }
             }
+            #[cfg(windows)]
+            if windows_file::link_count(p).ok() != Some(1) {
+                return Err((
+                    Some(input_name),
+                    "--write requires a regular file without symbolic or hard links".to_string(),
+                    None,
+                ));
+            }
         }
 
-        let source = if filename == "-" {
+        let source = if filename == Path::new("-") {
             let mut buf = Vec::new();
             io::stdin().read_to_end(&mut buf).map_err(|_| {
                 (
@@ -512,7 +643,7 @@ fn run() -> Result<i32, (Option<String>, String, Option<usize>)> {
     }
 
     for (fname, content) in replacements {
-        replace_file(Path::new(&fname), &content).map_err(|e| (Some(fname), e, None))?;
+        replace_file(&fname, &content).map_err(|e| (Some(fname.display().to_string()), e, None))?;
     }
 
     if check {
