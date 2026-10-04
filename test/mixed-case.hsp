@@ -1,0 +1,41 @@
+#const FMT_CASE_LIMIT 2
+VaLuE=0
+RePeAt Fmt_Case_Limit
+VaLuE+=CnT
+LoOp
+WhIlE vAlUe<3
+VALUE+
+WeNd
+FoR Index,0,2
+Value+=INDEX
+NeXt
+Do
+Value-=1
+UnTiL value=2
+SwItCh VALUE
+CaSe 2
+MeS "switch OK"
+SwBrEaK
+DeFaUlT
+MeS "switch failed"
+SwEnD
+IF ((VALUE=2)) { MeS "condition OK" }
+ElSe { MeS "condition failed" }
+MeS (VALUE AnD 3) Or (VALUE XoR 1)
+GoSuB*MiXeDlAbEl
+MixedCommand@MixedModule VALUE
+MeS MixedFunction(VALUE)
+MeS "mixed case integration ok"
+EnD
+
+*mixedlabel
+MeS "Label Case"
+ReTuRn
+
+#module mixedmodule
+#deffunc local mixedcommand int P_Value
+MeS p_value
+ReTuRn
+#defcfunc mixedfunction int P_Value
+ReTuRn p_value+1
+#global

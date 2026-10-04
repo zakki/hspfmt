@@ -1,0 +1,2 @@
+input.hsp:3: warning: ambiguous label or multiplication; preserving whitespace
+FooBar*MixedLabel

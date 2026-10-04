@@ -1,0 +1,14 @@
+#IfDeF FLAG
+RePeAt 2
+#ElSe
+RePeAt 3
+#EnDiF
+MeS CNT
+LoOp
+#MoDuLe MixedModule
+#DeFfUnC LoCaL MixedCommand INT P_Value,STR P_Text
+MeS P_Text+str(P_Value)
+ReTuRn
+#DeFcFuNc MixedFunction INT P_Value
+ReTuRn P_Value+1
+#GlObAl

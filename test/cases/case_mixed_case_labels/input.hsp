@@ -1,0 +1,5 @@
+GoSuB*MixedLabel
+ON 0 GoTo*MixedLabel,*OtherLabel
+FooBar*MixedLabel
+*MixedLabel
+ReTuRn

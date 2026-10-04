@@ -1,0 +1,15 @@
+RePeAt (2), (Start)
+    IF (VaLuE = 0) : MeS "IF"
+    WhIlE (VaLuE < 3)
+        VaLuE+
+    WeNd
+LoOp
+
+#MoDuLe MixedModule
+
+#DeFfUnC MixedCommand int P_Value
+    ReTuRn
+
+#DeFcFuNc MixedFunction int P_Value
+    ReTuRn P_Value
+#GlObAl

@@ -1,0 +1,6 @@
+--condition-parens=remove
+--repeat-parens=remove
+--short-if
+--operator-style=hsp
+--increment-style=c
+--hsp-prefixes

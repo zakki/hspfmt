@@ -1,0 +1,5 @@
+--condition-parens=add
+--repeat-parens=add
+--blank-lines-before-module=1
+--blank-lines-before-deffunc=1
+--blank-lines-before-defcfunc=1

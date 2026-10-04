@@ -1,0 +1,12 @@
+RePeAt (2)
+IF ((VaLuE==0)) {
+VaLuE+
+}
+WhIlE ((VaLuE!=3))
+VaLuE+
+WeNd
+If ((VaLuE==3)) { MeS "THEN" }
+eLsE { MeS "ELSE" }
+MeS (VaLuE AnD MASK) Or (VaLuE XoR 0xAbCd)
+MeS 1.0E-2,2D,0b_0010L,"IF Value AND",'Z' ; Keep Case
+LoOp

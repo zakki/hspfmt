@@ -1,0 +1,10 @@
+RePeAt 2
+    IF VaLuE = 0 : VaLuE++
+    WhIlE VaLuE ! 3
+        VaLuE++
+    WeNd
+    If VaLuE = 3 { MeS "THEN" }
+    eLsE { MeS "ELSE" }
+    MeS (VaLuE AnD MASK) Or (VaLuE XoR $AbCd)
+    MeS 1.0E-2, 2D, %_0010L, "IF Value AND", 'Z' ; Keep Case
+LoOp

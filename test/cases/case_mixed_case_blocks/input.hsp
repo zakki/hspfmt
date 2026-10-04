@@ -1,0 +1,23 @@
+RePeAt 2
+FoReAcH Values
+MeS CnT
+LoOp
+WhIlE Value<3
+VaLuE+=1
+WeNd
+FoR Index,0,2
+Value+=INDEX
+NeXt
+Do
+Value-=1
+UnTiL Value=2
+SwItCh VALUE
+CaSe 2
+MeS "RePeAt Value"
+SwBrEaK
+DeFaUlT
+MeS 'A'
+SwEnD
+If Value { MeS "IF" }
+ElSe { MeS "ELSE" }
+LoOp

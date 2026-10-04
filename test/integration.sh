@@ -218,6 +218,24 @@ for mode in roundtrip $modes; do
     cmp "$test_dir/roundtrip.out" "$test_dir/$mode.out"
 done
 
+# Case-insensitive HSP commands/symbols retain their spelling and runtime behavior.
+# Keep directive names lowercase for compatibility with HSP versions before 3.8.
+for mode in original default combined; do
+    case "$mode" in
+        original) set -- --roundtrip ;;
+        default) set -- ;;
+        combined) set -- --short-if --condition-parens=remove --repeat-parens=add --operator-style=c --increment-style=c ;;
+    esac
+    "$formatter" --no-config "$@" "$repo/test/mixed-case.hsp" > "$test_dir/mixed-case-$mode.hsp"
+    "$formatter" --no-config "$@" "$test_dir/mixed-case-$mode.hsp" > "$test_dir/mixed-case-again.hsp"
+    cmp "$test_dir/mixed-case-$mode.hsp" "$test_dir/mixed-case-again.hsp"
+    "$hspcmp" -i -u "--compath=$hsp_common/" "-o$test_dir/mixed-case-$mode.ax" \
+        "$test_dir/mixed-case-$mode.hsp" > "$test_dir/mixed-case-$mode.compile"
+    "$hsp3cl" "$test_dir/mixed-case-$mode.ax" > "$test_dir/mixed-case-$mode.out"
+    tail -n 1 "$test_dir/mixed-case-$mode.out" | grep -Fx 'mixed case integration ok'
+    cmp "$test_dir/mixed-case-original.out" "$test_dir/mixed-case-$mode.out"
+done
+
 for encoding in utf8 cp932; do
     case "$encoding" in
         utf8) set -- -i ;;
